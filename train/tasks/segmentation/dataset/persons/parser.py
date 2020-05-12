@@ -16,7 +16,7 @@ SCALES = [1.0, 0.75, 0.5]
 
 class ToLabel:
   def __call__(self, image):
-    return torch.from_numpy(np.array(image)).long()
+    return torch.from_numpy(np.array(image) / 255).long()
 
 
 def load_image(file):

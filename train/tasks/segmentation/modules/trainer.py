@@ -559,6 +559,7 @@ class Trainer():
 
         # compute output
         output = model(input)
+
         loss = criterion(output, target)
 
         # save a random image, if desired
