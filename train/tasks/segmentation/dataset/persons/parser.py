@@ -1,7 +1,7 @@
 # This file is covered by the LICENSE file in the root of this project.
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, ConcatDataset
 import torchvision.transforms as transforms
 import os
 import numpy as np
@@ -163,15 +163,22 @@ class Parser():
       self.crop_prop = crop_prop
       self.workers = workers
 
+      def make_train_dataset(loc):
+        return Persons(root=loc,
+                       subset='train',
+                       h=self.img_prop["height"],
+                       w=self.img_prop["width"],
+                       means=self.img_means,
+                       stds=self.img_stds,
+                       crop_h=self.crop_prop["height"],
+                       crop_w=self.crop_prop["width"])
+
       # Data loading code
-      self.train_dataset = Persons(root=self.location,
-                                   subset='train',
-                                   h=self.img_prop["height"],
-                                   w=self.img_prop["width"],
-                                   means=self.img_means,
-                                   stds=self.img_stds,
-                                   crop_h=self.crop_prop["height"],
-                                   crop_w=self.crop_prop["width"])
+      if isinstance(self.location, list) and len(self.location > 1):
+        self.train_dataset = ConcatDataset([make_train_dataset(loc) for loc in location])
+      else:
+        self.train_dataset = make_train_dataset(loc)
+
 
       self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
                                                      batch_size=self.batch_size,
@@ -195,12 +202,18 @@ class Parser():
 
       print("Inference batch size: ", self.val_batch_size)
 
-      self.valid_dataset = Persons(root=self.location,
-                                   subset='valid',
-                                   h=self.img_prop["height"],
-                                   w=self.img_prop["width"],
-                                   means=self.img_means,
-                                   stds=self.img_stds)
+      def make_valid_dataset(loc):
+        return Persons(root=loc,
+                       subset='valid',
+                       h=self.img_prop["height"],
+                       w=self.img_prop["width"],
+                       means=self.img_means,
+                       stds=self.img_stds)
+
+      if isinstance(self.location, list) and len(self.location > 1):
+        self.valid_dataset = ConcatDataset([make_valid_dataset(loc) for loc in location])
+      else:
+        self.valid_dataset = make_valid_dataset(loc)
 
       self.validloader = torch.utils.data.DataLoader(self.valid_dataset,
                                                      batch_size=self.val_batch_size,
