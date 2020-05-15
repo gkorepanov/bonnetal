@@ -132,7 +132,7 @@ class TraceSaver():
     with torch.no_grad():
       print("Profiling model")
       print("saving model in ", onnx_path)
-      torch.onnx.export(self.model, self.dummy_input, onnx_path, keep_initializers_as_inputs=True)
+      torch.onnx.export(self.model, self.dummy_input, onnx_path, keep_initializers_as_inputs=False, opset_version=11)
 
     # check that it worked
     print("Checking that it all worked out")
