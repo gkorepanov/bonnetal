@@ -64,7 +64,6 @@ class Trainer():
                                       train=True,
                                       location=self.CFG["dataset"]["location"],
                                       batch_size=self.CFG["train"]["batch_size"],
-                                      crop_prop=self.CFG["train"]["crop_prop"],
                                       workers=self.CFG["dataset"]["workers"])
 
     self.data_h, self.data_w, self.data_d = self.parser.get_img_size()

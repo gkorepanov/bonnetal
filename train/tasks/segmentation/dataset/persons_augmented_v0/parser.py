@@ -24,7 +24,7 @@ def is_image(filename):
 
 
 class SegmentationDataset(Dataset):
-    def __init__(self, root, subset, h, w, means, stds, *args, **kwargs):
+    def __init__(self, root, subset, h, w, means, stds):
         self.images_root = os.path.join(root, subset, "img")
         self.labels_root = os.path.join(root, subset, "lbl")
 
@@ -111,7 +111,7 @@ class Persons(SegmentationDataset):
 
 class Parser():
   # standard conv, BN, relu
-  def __init__(self, img_prop, img_means, img_stds, classes, train, location=None, batch_size=None, crop_prop=None, workers=2):
+  def __init__(self, img_prop, img_means, img_stds, classes, train, location=None, batch_size=None, workers=2):
     super(Parser, self).__init__()
 
     self.img_prop = img_prop
@@ -124,7 +124,6 @@ class Parser():
       # if I am training, get the dataset
       self.location = location
       self.batch_size = batch_size
-      self.crop_prop = crop_prop
       self.workers = workers
 
       def make_train_dataset(loc):
@@ -133,15 +132,13 @@ class Parser():
                        h=self.img_prop["height"],
                        w=self.img_prop["width"],
                        means=self.img_means,
-                       stds=self.img_stds,
-                       crop_h=self.crop_prop["height"],
-                       crop_w=self.crop_prop["width"])
+                       stds=self.img_stds)
 
       # Data loading code
-      if isinstance(self.location, list) and len(self.location > 1):
-        self.train_dataset = ConcatDataset([make_train_dataset(loc) for loc in location])
+      if isinstance(self.location, list) and len(self.location) > 1:
+        self.train_dataset = ConcatDataset([make_train_dataset(loc) for loc in self.location])
       else:
-        self.train_dataset = make_train_dataset(loc)
+        self.train_dataset = make_train_dataset(self.location)
 
 
       self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
@@ -154,10 +151,7 @@ class Parser():
       self.trainiter = iter(self.trainloader)
 
       # calculate validation batch from train batch and image sizes
-      factor_val_over_train = float(self.img_prop["height"] * self.img_prop["width"]) / float(
-          self.crop_prop["height"] * self.crop_prop["width"])
-      self.val_batch_size = max(
-          1, int(self.batch_size / factor_val_over_train))
+      self.val_batch_size = max(1, int(self.batch_size))
 
       # if gpus are available make val_batch_size at least the number of gpus
       if torch.cuda.is_available() and torch.cuda.device_count() > 1:
@@ -174,10 +168,10 @@ class Parser():
                        means=self.img_means,
                        stds=self.img_stds)
 
-      if isinstance(self.location, list) and len(self.location > 1):
-        self.valid_dataset = ConcatDataset([make_valid_dataset(loc) for loc in location])
+      if isinstance(self.location, list) and len(self.location) > 1:
+        self.valid_dataset = ConcatDataset([make_valid_dataset(loc) for loc in self.location])
       else:
-        self.valid_dataset = make_valid_dataset(loc)
+        self.valid_dataset = make_valid_dataset(self.location)
 
       self.validloader = torch.utils.data.DataLoader(self.valid_dataset,
                                                      batch_size=self.val_batch_size,
