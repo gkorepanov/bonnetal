@@ -89,8 +89,7 @@ class Trainer():
                                      extra=self.CFG["decoder"]["extra"])
 
     self.head_cfg = HeadConfig(n_class=self.parser.get_n_classes() - 1,
-                               dropout=self.CFG["head"]["dropout"],
-                               weights=self.loss_w)
+                               dropout=self.CFG["head"]["dropout"])
 
     # concatenate the encoder and the head
     with torch.no_grad():
@@ -144,7 +143,7 @@ class Trainer():
     if torch.cuda.is_available() and torch.cuda.device_count() > 1:
       print("Let's use", torch.cuda.device_count(), "GPUs!")
       self.model = nn.DataParallel(self.model)   # spread in gpus
-      self.model = convert_model(self.model).cuda()  # sync batchnorm
+     # self.model = convert_model(self.model).cuda()  # sync batchnorm
       self.model_single = self.model.module  # single model to get weight names
       self.multi_gpu = True
       self.n_gpus = torch.cuda.device_count()
@@ -322,10 +321,6 @@ class Trainer():
                                                  save_images=self.CFG["train"]["save_imgs"],
                                                  class_dict=self.CFG["dataset"]["labels"])
 
-        # colorize images
-        for i, img in enumerate(rand_img[:]):
-          rand_img[i] = self.colorizer.do(img)
-
         # update info
         self.info["valid_loss"] = loss
         self.info["valid_acc"] = acc
@@ -355,8 +350,8 @@ class Trainer():
               if i == 0:
                 avg_backbone[key].data.zero_()
               # then sum the avg contribution
-              avg_backbone[key] += backbone[key] / \
-                  float(len(self.best_backbones))
+              avg_backbone[key] += (backbone[key] / \
+                  float(len(self.best_backbones))).to(avg_backbone[key].dtype)
 
           # append current backbone to its circular buffer
           current_decoder = self.model_single.decoder.state_dict()
@@ -373,8 +368,8 @@ class Trainer():
               if i == 0:
                 avg_decoder[key].data.zero_()
               # then sum the avg contribution
-              avg_decoder[key] += decoder[key] / \
-                  float(len(self.best_decoders))
+              avg_decoder[key] += (decoder[key] / \
+                  float(len(self.best_decoders))).to(decoder[key].dtype)
 
           # append current head to its circular buffer
           current_head = self.model_single.head.state_dict()
@@ -391,7 +386,7 @@ class Trainer():
               if i == 0:
                 avg_head[key].data.zero_()
               # then sum the avg contribution
-              avg_head[key] += head[key] / float(len(self.best_heads))
+              avg_head[key] += (head[key] / float(len(self.best_heads))).to(head[key].dtype)
 
           # put averaged weights in dictionary and evaluate again
           self.model_single.backbone.load_state_dict(avg_backbone)

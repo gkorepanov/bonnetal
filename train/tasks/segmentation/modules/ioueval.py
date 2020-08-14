@@ -22,7 +22,7 @@ class iouEval:
 
   def reset(self):
     self.conf_matrix = torch.zeros(
-        (self.n_classes, self.n_classes), device=self.device).long()
+        (self.n_classes, self.n_classes), device=self.device).double()
     self.ones = None
 
   def addBatch(self, x, y):  # x=preds, y=targets
@@ -35,7 +35,7 @@ class iouEval:
 
     # ones is what I want to add to conf when I
     if self.ones is None:
-      self.ones = torch.ones((idxs.shape[-1]), device=self.device).long()
+      self.ones = torch.ones((idxs.shape[-1]), device=self.device).double()
 
     # make confusion matrix (cols = gt, rows = pred)
     self.conf_matrix = self.conf_matrix.index_put_(
