@@ -52,6 +52,10 @@ class SegmentationDataset(Dataset):
         self.tensorize_image = torchvision.transforms.ToTensor()
         self.tensorize_label = lambda x: torch.from_numpy(np.squeeze(x)).long()
         self.norm = torchvision.transforms.Normalize(mean=self.means, std=self.stds)
+        self.inv_norm = torchvision.transforms.Compose([
+            torchvision.transforms.Normalize(mean = [ 0., 0., 0. ], std = 1 / np.array(self.stds)),
+            torchvision.transforms.Normalize(mean = -np.array(self.means), std = [ 1., 1., 1. ]),
+        ])
         
     def run_augmentations(self, image, label):
         return self.to_imgaug_format(image, label)
@@ -140,13 +144,16 @@ class Parser():
       else:
         self.train_dataset = make_train_dataset(self.location)
 
+      def worker_init_fn(worker_id):
+        ia.seed(np.random.get_state()[1][0] + worker_id)
 
       self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
                                                      batch_size=self.batch_size,
                                                      shuffle=True,
                                                      num_workers=self.workers,
                                                      pin_memory=True,
-                                                     drop_last=True)
+                                                     drop_last=True,
+                                                     worker_init_fn=worker_init_fn)
       assert len(self.trainloader) > 0
       self.trainiter = iter(self.trainloader)
 
@@ -178,7 +185,8 @@ class Parser():
                                                      shuffle=False,
                                                      num_workers=self.workers,
                                                      pin_memory=True,
-                                                     drop_last=True)
+                                                     drop_last=True,
+                                                     worker_init_fn=worker_init_fn)
       assert len(self.validloader) > 0
       self.validiter = iter(self.validloader)
 
@@ -216,3 +224,6 @@ class Parser():
 
   def get_means_stds(self):
     return self.img_means, self.img_stds
+
+  def get_inv_normalize(self):
+    return self.valid_dataset.inv_norm

@@ -216,6 +216,7 @@ class Trainer():
               tag + '/grad', value.grad.data.cpu().numpy(), epoch)
 
     if img_summary:
+      logger.image_summary(tag, rand_imgs, epoch)
       directory = os.path.join(logdir, "predictions")
       if not os.path.isdir(directory):
         os.makedirs(directory)
@@ -556,7 +557,9 @@ class Trainer():
 
         # save a random image, if desired
         if(save_images):
-          rand_imgs.append(self.make_log_image(input[0], output[0], target[0]))
+          for j in range(5):
+            index = np.random.randint(0, input.shape[0] - 1)
+            rand_imgs.append(self.make_log_image(input[index], output[index], target[index]))
 
         # measure accuracy and record loss
         evaluator.addBatch(output.argmax(dim=1), target)
@@ -588,6 +591,7 @@ class Trainer():
 
   def make_log_image(self, input, pred, target):
     # colorize and put in format
+    input = self.parser.get_inv_normalize()(input)
     input = input.cpu().numpy().transpose(1, 2, 0)
     pred = pred.cpu().numpy().argmax(0)
     target = target.cpu().numpy()
