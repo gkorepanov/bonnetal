@@ -88,7 +88,7 @@ class Trainer():
                                      bn_d=self.CFG["decoder"]["bn_d"],
                                      extra=self.CFG["decoder"]["extra"])
 
-    self.head_cfg = HeadConfig(n_class=self.parser.get_n_classes(),
+    self.head_cfg = HeadConfig(n_class=self.parser.get_n_classes() - 1,
                                dropout=self.CFG["head"]["dropout"],
                                weights=self.loss_w)
 
@@ -250,9 +250,6 @@ class Trainer():
                                                evaluator=self.evaluator,
                                                save_images=self.CFG["train"]["save_imgs"],
                                                class_dict=self.CFG["dataset"]["labels"])
-      # colorize images
-      for i, img in enumerate(rand_img[:]):
-        rand_img[i] = self.colorizer.do(img)
 
       # update info
       self.info["valid_loss"] = loss
@@ -475,6 +472,7 @@ class Trainer():
 
       # compute output
       output = model(input)
+      output = torch.cat([1 - output, output], dim=1)
       loss = criterion(output, target)
 
       # compute gradient and do SGD step
@@ -558,12 +556,12 @@ class Trainer():
 
         # compute output
         output = model(input)
-
+        output = torch.cat([1 - output, output], dim=1)
         loss = criterion(output, target)
 
         # save a random image, if desired
         if(save_images):
-          rand_imgs.append(self.make_log_image(output[0], target[0]))
+          rand_imgs.append(self.make_log_image(input[0], output[0], target[0]))
 
         # measure accuracy and record loss
         evaluator.addBatch(output.argmax(dim=1), target)
@@ -593,10 +591,12 @@ class Trainer():
 
     return acc.avg, iou.avg, losses.avg, rand_imgs
 
-  def make_log_image(self, pred, target):
+  def make_log_image(self, input, pred, target):
     # colorize and put in format
+    input = input.cpu().numpy().transpose(1, 2, 0)
     pred = pred.cpu().numpy().argmax(0)
     target = target.cpu().numpy()
     output = np.concatenate((pred, target), axis=1)
+    output = self.colorizer.do(output)
 
-    return output
+    return np.concatenate((input, output), axis=1)

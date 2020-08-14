@@ -112,6 +112,9 @@ class ASPP(nn.Module):
       self.rates3x3 = [6, 12, 18]
       print("UNKNOWN RATE FOR OS: ", self.OS, "USING DEFAULT")
 
+    print("Override dilation rates")
+    self.rates3x3 = [3, 6, 9]
+
     # aspp
     self.aspp_conv_1x1 = ConvBnRelu(self.feature_depth,
                                     self.filters,

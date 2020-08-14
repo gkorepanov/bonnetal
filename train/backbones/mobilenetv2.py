@@ -54,12 +54,12 @@ class Backbone(nn.Module):
       print("New OS: ", current_os)
 
       # dilations
-      self.current_d = 1
-      for i, layer in enumerate(self.layers, 0):
-        # if new stride is different, up the dilation
-        if self.new_layers[i][3] < layer[3]:
-          self.current_d *= 2
-        self.new_layers[i][4] *= self.current_d
+      # self.current_d = 1
+      # for i, layer in enumerate(self.layers, 0):
+      #   # if new stride is different, up the dilation
+      #   if self.new_layers[i][3] < layer[3]:
+      #     self.current_d *= 2
+      #   self.new_layers[i][4] *= self.current_d
 
       # check that the output stride mod worked
       assert current_os == OS
@@ -146,7 +146,7 @@ class Backbone(nn.Module):
       y = layer(x)
       if y.shape[2] < x.shape[2] or y.shape[3] < x.shape[3]:
         # only equal downsampling is contemplated
-        assert(x.shape[2]/y.shape[2] == x.shape[3]/y.shape[3])
+        assert(x.shape[2] // y.shape[2] == x.shape[3] // y.shape[3])
         skips[current_os] = x.detach()
         current_os *= 2
       x = y

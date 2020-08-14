@@ -2,6 +2,7 @@
 
 from __future__ import print_function
 import torch.nn as nn
+from torch.nn import functional as F
 import torch
 from common.layers import *
 
@@ -34,7 +35,6 @@ class Decoder(nn.Module):
     # except for OS=1, because it is usually the input, so do do a trick here
     current_os = self.backbone_OS
     current_depth = self.aspp_channels
-    self.upconvs = nn.ModuleList()
     self.mixconvs = nn.ModuleList()
     while current_os > 1:
       current_os //= 2
@@ -46,11 +46,6 @@ class Decoder(nn.Module):
         next_depth = self.last_channels
       print("[Decoder] os: ", current_os, "in: ",
             current_depth, "skip:", skip_depth, "out: ", next_depth)
-      self.upconvs.append(nn.ConvTranspose2d(current_depth,
-                                             current_depth,
-                                             kernel_size=2,
-                                             stride=2,
-                                             padding=0))
       self.mixconvs.append(ConvBnRelu(current_depth + skip_depth,
                                       next_depth,
                                       k=3,
@@ -61,10 +56,10 @@ class Decoder(nn.Module):
     features = self.ASPP(features)
     current_os = self.backbone_OS
     # do one upconv and one residual
-    for upconv, mixconv in zip(self.upconvs, self.mixconvs):
+    for mixconv in self.mixconvs:
       current_os //= 2
       # upconv (convolution + upsampling)
-      features = upconv(features)  # upsample to match skip
+      features = F.interpolate(features, scale_factor=2)  # upsample to match skip
       # add from skip (no grad)
       features = torch.cat([features, skips[current_os].detach()], dim=1)
       # do mixing of lower and higher levels

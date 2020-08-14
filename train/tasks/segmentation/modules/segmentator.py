@@ -4,7 +4,7 @@
 import imp
 import torch
 import torch.nn as nn
-import __init__ as booger
+from . import TRAIN_PATH
 
 from tasks.segmentation.modules.head import *
 
@@ -19,7 +19,7 @@ class Segmentator(nn.Module):
 
     # get the model
     bboneModule = imp.load_source("bboneModule",
-                                  booger.TRAIN_PATH + '/backbones/' +
+                                  TRAIN_PATH + '/backbones/' +
                                   self.backbone_cfg.name + '.py')
     self.backbone = bboneModule.Backbone(input_size=[self.backbone_cfg.h,
                                                      self.backbone_cfg.w,
@@ -38,7 +38,7 @@ class Segmentator(nn.Module):
     _, skips = self.backbone(stub)
 
     decoderModule = imp.load_source("decoderModule",
-                                    booger.TRAIN_PATH + '/tasks/segmentation/decoders/' +
+                                    TRAIN_PATH + '/tasks/segmentation/decoders/' +
                                     self.decoder_cfg.name + '.py')
     self.decoder = decoderModule.Decoder(input_size=[self.backbone_cfg.h,
                                                      self.backbone_cfg.w,
@@ -95,7 +95,7 @@ class Segmentator(nn.Module):
           raise e
     else:
       print("No path to pretrained, using bonnetal Imagenet backbone weights and random decoder.")
-      
+
 
   def forward(self, x):
     x, skips = self.backbone(x)
