@@ -52,11 +52,7 @@ class SegmentationDataset(Dataset):
         self.tensorize_image = torchvision.transforms.ToTensor()
         self.tensorize_label = lambda x: torch.from_numpy(np.squeeze(x)).long()
         self.norm = torchvision.transforms.Normalize(mean=self.means, std=self.stds)
-        self.inv_norm = torchvision.transforms.Compose([
-            torchvision.transforms.Normalize(mean = [ 0., 0., 0. ], std = 1 / np.array(self.stds)),
-            torchvision.transforms.Normalize(mean = -np.array(self.means), std = [ 1., 1., 1. ]),
-        ])
-        
+
     def run_augmentations(self, image, label):
         return self.to_imgaug_format(image, label)
     
@@ -123,6 +119,10 @@ class Parser():
     self.img_stds = img_stds
     self.classes = classes
     self.train = train
+    self.inv_norm = torchvision.transforms.Compose([
+        torchvision.transforms.Normalize(mean = [ 0., 0., 0. ], std = 1 / np.array(self.img_stds)),
+        torchvision.transforms.Normalize(mean = -np.array(self.img_means), std = [ 1., 1., 1. ]),
+    ])
 
     if self.train:
       # if I am training, get the dataset
@@ -226,4 +226,4 @@ class Parser():
     return self.img_means, self.img_stds
 
   def get_inv_normalize(self):
-    return self.valid_dataset.inv_norm
+    return self.inv_norm

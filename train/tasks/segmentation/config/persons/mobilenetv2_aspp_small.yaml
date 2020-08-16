@@ -50,8 +50,10 @@ head:
 # dataset (to find parser)
 dataset:
   name: "persons_augmented_v0"
-  location: "/cache/datasets/persons/dataset"
-  workers: 3 # number of threads to get data
+  location:
+   - /home/g-korepanov/datasets/supervisely_processed
+   - /home/g-korepanov/datasets/nvidia_processed
+  workers: 24 # number of threads to get data
   img_means: #rgb
     - 0.46992042
     - 0.45250652

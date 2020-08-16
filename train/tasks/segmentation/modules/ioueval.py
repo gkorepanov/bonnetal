@@ -38,8 +38,12 @@ class iouEval:
       self.ones = torch.ones((idxs.shape[-1]), device=self.device).double()
 
     # make confusion matrix (cols = gt, rows = pred)
-    self.conf_matrix = self.conf_matrix.index_put_(
-        tuple(idxs), self.ones, accumulate=True)
+    try:
+        self.conf_matrix = self.conf_matrix.index_put_(
+            tuple(idxs), self.ones, accumulate=True)
+    except RuntimeError:
+        print(self.conf_matrix.shape, idxs.shape, self.ones.shape)
+        raise
 
     # print(self.tp.shape)
     # print(self.fp.shape)

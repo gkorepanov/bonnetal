@@ -33,8 +33,6 @@ tensorflow==1.14.0
 tensorflow-estimator==1.14.0
 termcolor==1.1.0
 tifffile==2020.7.24
-torch @ file:///home/g-korepanov/bonnetal/train/tasks/segmentation/torch-1.4.0%2Bcu100-cp36-cp36m-linux_x86_64.whl
-torchvision @ file:///home/g-korepanov/bonnetal/train/tasks/segmentation/torchvision-0.5.0%2Bcu100-cp36-cp36m-linux_x86_64.whl
 Werkzeug==1.0.1
 wrapt==1.12.1
 zipp==3.1.0

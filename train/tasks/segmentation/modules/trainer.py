@@ -489,7 +489,7 @@ class Trainer():
         jaccard, class_jaccard = evaluator.getIoU()
       losses.update(loss.item(), input.size(0))
       acc.update(accuracy.item(), input.size(0))
-      iou.update(jaccard.item(), input.size(0))
+      iou.update(class_jaccard[-1].item(), input.size(0))
 
       # measure elapsed time
       batch_time.update(time.time() - end)
@@ -591,7 +591,7 @@ class Trainer():
 
   def make_log_image(self, input, pred, target):
     # colorize and put in format
-    input = self.parser.get_inv_normalize()(input)
+    input = self.parser.get_inv_normalize()(input)*255
     input = input.cpu().numpy().transpose(1, 2, 0)
     pred = pred.cpu().numpy().argmax(0)
     target = target.cpu().numpy()
