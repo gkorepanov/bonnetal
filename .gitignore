@@ -9,3 +9,5 @@
 devel/
 logs/
 external.hpp
+venv
+*.onnx
