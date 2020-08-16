@@ -139,10 +139,7 @@ class Parser():
                        stds=self.img_stds)
 
       # Data loading code
-      if isinstance(self.location, list) and len(self.location) > 1:
-        self.train_dataset = ConcatDataset([make_train_dataset(loc) for loc in self.location])
-      else:
-        self.train_dataset = make_train_dataset(self.location)
+      self.train_dataset = ConcatDataset([make_train_dataset(loc) for loc in self.location])
 
       def worker_init_fn(worker_id):
         ia.seed(np.random.get_state()[1][0] + worker_id)
@@ -175,10 +172,7 @@ class Parser():
                        means=self.img_means,
                        stds=self.img_stds)
 
-      if isinstance(self.location, list) and len(self.location) > 1:
-        self.valid_dataset = ConcatDataset([make_valid_dataset(loc) for loc in self.location])
-      else:
-        self.valid_dataset = make_valid_dataset(self.location)
+      self.valid_dataset = ConcatDataset([make_valid_dataset(loc) for loc in self.location])
 
       self.validloader = torch.utils.data.DataLoader(self.valid_dataset,
                                                      batch_size=self.val_batch_size,

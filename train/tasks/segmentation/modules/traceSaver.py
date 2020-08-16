@@ -73,7 +73,7 @@ class TraceSaver():
                                      bn_d=self.CFG["decoder"]["bn_d"],
                                      extra=self.CFG["decoder"]["extra"])
 
-    self.head_cfg = HeadConfig(n_class=self.parser.get_n_classes(),
+    self.head_cfg = HeadConfig(n_class=self.parser.get_n_classes() - 1,
                                dropout=self.CFG["head"]["dropout"])
 
     # concatenate the encoder and the head
@@ -132,7 +132,7 @@ class TraceSaver():
     with torch.no_grad():
       print("Profiling model")
       print("saving model in ", onnx_path)
-      torch.onnx.export(self.model, self.dummy_input, onnx_path, keep_initializers_as_inputs=False, opset_version=11)
+      torch.onnx.export(self.model, self.dummy_input, onnx_path, keep_initializers_as_inputs=False, opset_version=9)
 
     # check that it worked
     print("Checking that it all worked out")
