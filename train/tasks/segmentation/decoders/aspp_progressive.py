@@ -24,10 +24,11 @@ class Decoder(nn.Module):
     self.ASPP = ASPP(feature_depth=self.backbone_feature_depth,
                      input_h=self.backbone_input_size[0],
                      input_w=self.backbone_input_size[1],
-                     OS=self.backbone_OS,
+                     OS=OS,
                      filters=self.aspp_channels,
                      dropout=self.dropout,
-                     bn_d=self.bn_d)
+                     bn_d=self.bn_d
+                     rates=extra.get('ASPP_rates'))
 
     # decoder part is somewhat like deeplabv3+ (starts with an ASPP) and then
     # decodes and skips

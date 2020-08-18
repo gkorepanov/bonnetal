@@ -41,6 +41,7 @@ decoder:
   extra:
     aspp_channels: 32
     last_channels: 16
+    ASPP_rates: [4, 8, 12]  # 18 x 32 map
 
 # classification head parameters
 head:

@@ -87,7 +87,7 @@ class InvertedResidual(nn.Module):
 
 class ASPP(nn.Module):
   # no global pooling, for robotics it doesn't make much sense
-  def __init__(self, feature_depth, input_h, input_w, OS, filters, bn_d=0.1, dropout=0.0):
+  def __init__(self, feature_depth, input_h, input_w, OS, filters, bn_d=0.1, dropout=0.0, rates=None):
     super(ASPP, self).__init__()
     self.feature_depth = feature_depth
     self.input_h = input_h
@@ -102,7 +102,11 @@ class ASPP(nn.Module):
     self.feat_w = int(self.input_w / self.OS)
 
     # atrous rates 1 1x1 conv, 3 3x3 convs
-    if self.OS == 32:
+    if rates:
+      self.rates3x3 = rates
+    else:
+      raise ValueError()
+    elif self.OS == 32:
       self.rates3x3 = [3, 6, 9]
     elif self.OS == 16:
       self.rates3x3 = [6, 12, 18]
@@ -111,9 +115,6 @@ class ASPP(nn.Module):
     else:
       self.rates3x3 = [6, 12, 18]
       print("UNKNOWN RATE FOR OS: ", self.OS, "USING DEFAULT")
-
-    print("Override dilation rates")
-    self.rates3x3 = [3, 6, 9]
 
     # aspp
     self.aspp_conv_1x1 = ConvBnRelu(self.feature_depth,

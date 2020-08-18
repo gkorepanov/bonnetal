@@ -30,7 +30,7 @@ backbone:
   OS: 8 # output stride
   train: True # train backbone?
   extra:
-    width_mult: 0.5
+    width_mult: 1.0
     shallow_feats: True # get features before the last layer (mn2)
 
 decoder:
@@ -41,7 +41,7 @@ decoder:
   extra:
     aspp_channels: 32
     last_channels: 16
-    ASPP_rates: [4, 8, 12]  # 18 x 32 map
+    ASPP_rates: [3, 6, 9]  # 18 x 32 map
 
 # classification head parameters
 head:
@@ -50,7 +50,7 @@ head:
 
 # dataset (to find parser)
 dataset:
-  name: "persons_augmented_v0"
+  name: "persons"
   location:
    - /home/g-korepanov/datasets/supervisely_processed
    - /home/g-korepanov/datasets/nvidia_processed
