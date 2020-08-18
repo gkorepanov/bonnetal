@@ -328,7 +328,7 @@ class Trainer():
         self.info["valid_iou"] = iou
 
         # remember best iou and save checkpoint
-        if iou > best_val_iou:
+        if iou > best_val_iou and epoch > 10:
           print("Best mean iou in validation so far, save model!")
           print("*" * 80)
           best_val_iou = iou

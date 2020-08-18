@@ -50,7 +50,7 @@ class SegmentationDataset(Dataset):
             os.path.expanduser(self.labels_root)) for f in fn if is_image(f)]
 
         self.filenames_faces = [os.path.join(dp, f) for dp, dn, fn in os.walk(
-            os.path.expanduser(self.faces_root))]
+            os.path.expanduser(self.faces_root)) for f in fn]
 
         self.filenames_images.sort()
         self.filenames_labels.sort()
@@ -73,7 +73,7 @@ class SegmentationDataset(Dataset):
 
     def to_imgaug_format(self, image, label, face):
         image = np.array(image)
-        bbox = [int(x) for in face.split(' ')]
+        bbox = [int(x) for x in face.split(' ')]
         segmap = (np.array(label) / 255).astype(bool)
 
         segmaps = SegmentationMapsOnImage(segmap, image.shape)
@@ -91,20 +91,20 @@ class SegmentationDataset(Dataset):
             image = Image.open(f).convert('RGB')
         with open(filename_label, 'rb') as f:
             label = Image.open(f).convert('L')
-        with open(filename_face, 'rb') as f:
+        with open(filename_face, 'r') as f:
             face = f.read()
 
         return self.run_augmentations(image, label, face)
 
     def __len__(self):
-        return len(self.filenames)
+        return len(self.filenames_images)
 
 
 class Persons(SegmentationDataset):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        assert kwargs['h'] = 144
-        assert kwargs['w'] = 256
+        assert kwargs['h'] == 144
+        assert kwargs['w'] == 256
         self.augmentations = iaa.Sequential([
             iaa.Fliplr(0.5),
             iaa.Affine(scale={'x': (0.95, 1.05), 'y': 1}, rotate=iap.Normal(0, 10)),
@@ -140,7 +140,7 @@ class Persons(SegmentationDataset):
 
         y_min = bb.y2 - height
         y_max = bb.y1
-        average = y_min * 0.7 + y_max * 0.3
+        average = y_min * 0.3 + y_max * 0.7
         distr = iap.Uniform((y_min, average), (average, y_max))
         y = int(distr.draw_sample())
 
@@ -149,16 +149,19 @@ class Persons(SegmentationDataset):
         height = int(height)
         width = int(width)
 
-        img = np.pad(img, (
-            (max(0 - y, 0), max(y + height - image.shape[0], 0)),
-            (max(0 - x, 0), max(x + width - image.shape[1], 0)),
-            (0, 0)
-        ))
-        x = max(x, 0)
-        y = max(y, 0)
+        def augment(img, x, y, height, width):
+            img = np.pad(img, (
+                (max(0 - y, 0), max(y + height - image.shape[0], 0)),
+                (max(0 - x, 0), max(x + width - image.shape[1], 0)),
+                (0, 0)
+            ))
+            x = max(x, 0)
+            y = max(y, 0)
+            return cv2.resize(img[y:y+height, x:x+width], (256, 144))
 
-        img = cv2.resize(img[y:y+height, x:x+width], (256, 144))
-        return self.normalize_and_tensorize(img, segmap.arr)
+        img = augment(img, x, y, height, width)
+        segmaps = augment(segmaps.arr.astype(np.uint8), x, y, height, width)
+        return self.normalize_and_tensorize(img, segmaps)
 
 
 class Parser():
@@ -194,7 +197,8 @@ class Parser():
       self.train_dataset = ConcatDataset([make_train_dataset(loc) for loc in self.location])
 
       def worker_init_fn(worker_id):
-        ia.seed(np.random.get_state()[1][0] + worker_id)
+          np.random.seed()
+          ia.seed(np.random.get_state()[1][0] + worker_id)
 
       self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
                                                      batch_size=self.batch_size,
