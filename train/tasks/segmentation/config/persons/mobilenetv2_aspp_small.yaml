@@ -24,7 +24,7 @@ train:
 
 # backbone parameters
 backbone:
-  name: "mobilenetv2"
+  name: "mobilenetv2small"  # no dilations
   dropout: 0.02
   bn_d: 0.05
   OS: 8 # output stride
