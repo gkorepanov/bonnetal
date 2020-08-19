@@ -62,6 +62,7 @@ class Trainer():
                                       img_stds=self.CFG["dataset"]["img_stds"],
                                       classes=self.CFG["dataset"]["labels"],
                                       train=True,
+				      crop_prop=self.CFG["train"]["crop_prop"],
                                       location=self.CFG["dataset"]["location"],
                                       batch_size=self.CFG["train"]["batch_size"],
                                       workers=self.CFG["dataset"]["workers"])
@@ -303,14 +304,14 @@ class Trainer():
       self.info["train_acc"] = acc
       self.info["train_iou"] = iou
 
-      # remember best iou and save checkpoint
-      if iou > best_train_iou:
-        print("Best mean iou in training set so far, save model!")
-        best_train_iou = iou
-        self.save_checkpoint(bbone=self.model_single.backbone.state_dict(),
-                             decoder=self.model_single.decoder.state_dict(),
-                             head=self.model_single.head.state_dict(),
-                             suffix="_train")
+#      # remember best iou and save checkpoint
+#      if iou > best_train_iou:
+#        print("Best mean iou in training set so far, save model!")
+#        best_train_iou = iou
+#        self.save_checkpoint(bbone=self.model_single.backbone.state_dict(),
+#                             decoder=self.model_single.decoder.state_dict(),
+#                             head=self.model_single.head.state_dict(),
+#                             suffix="_train")
 
       if epoch % self.CFG["train"]["report_epoch"] == 0:
         # evaluate on validation set

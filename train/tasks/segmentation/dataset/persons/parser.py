@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 import random
 import torchvision.transforms.functional as TF
+import torchvision
 import cv2
 
 EXTENSIONS = ['.jpg', '.jpeg', '.png']
@@ -155,6 +156,10 @@ class Parser():
     self.img_stds = img_stds
     self.classes = classes
     self.train = train
+    self.inv_norm = torchvision.transforms.Compose([
+        torchvision.transforms.Normalize(mean = [ 0., 0., 0. ], std = 1 / np.array(self.img_stds)),
+        torchvision.transforms.Normalize(mean = -np.array(self.img_means), std = [ 1., 1., 1. ]),
+    ])
 
     if self.train:
       # if I am training, get the dataset
@@ -251,3 +256,6 @@ class Parser():
 
   def get_means_stds(self):
     return self.img_means, self.img_stds
+
+  def get_inv_normalize(self):
+    return self.inv_norm

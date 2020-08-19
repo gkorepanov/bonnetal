@@ -106,7 +106,7 @@ class ASPP(nn.Module):
       self.rates3x3 = rates
     else:
       raise ValueError()
-    elif self.OS == 32:
+    if self.OS == 32:
       self.rates3x3 = [3, 6, 9]
     elif self.OS == 16:
       self.rates3x3 = [6, 12, 18]

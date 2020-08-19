@@ -166,7 +166,7 @@ class Persons(SegmentationDataset):
 
 class Parser():
   # standard conv, BN, relu
-  def __init__(self, img_prop, img_means, img_stds, classes, train, location=None, batch_size=None, workers=2):
+  def __init__(self, img_prop, img_means, img_stds, classes, train, location=None, batch_size=None, workers=2, crop_prop=None):
     super(Parser, self).__init__()
 
     self.img_prop = img_prop
