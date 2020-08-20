@@ -556,12 +556,6 @@ class Trainer():
         output = torch.cat([1 - output, output], dim=1)
         loss = criterion(output, target)
 
-        # save a random image, if desired
-        if(save_images):
-          for j in range(5):
-            index = np.random.randint(0, input.shape[0] - 1)
-            rand_imgs.append(self.make_log_image(input[index], output[index], target[index]))
-
         # measure accuracy and record loss
         evaluator.addBatch(output.argmax(dim=1), target)
         loss = loss.mean()
@@ -570,6 +564,12 @@ class Trainer():
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
+
+      # save a random image, if desired
+      if(save_images):
+        for j in range(5):
+          index = np.random.randint(0, input.shape[0] - 1)
+          rand_imgs.append(self.make_log_image(input[index], output[index], target[index]))
 
       accuracy = evaluator.getacc()
       jaccard, class_jaccard = evaluator.getIoU()
