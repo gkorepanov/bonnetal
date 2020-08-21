@@ -37,7 +37,8 @@ class Decoder(nn.Module):
     current_os = self.backbone_OS
     current_depth = self.aspp_channels
     self.mixconvs = nn.ModuleList()
-    while current_os > 1:
+    self.upconvs = nn.ModuleList()
+    while current_os > 4:
       current_os //= 2
       skip_depth = skips[current_os].shape[1]
       # only add skip if OS is more than 1, otherwise just upconv
@@ -51,18 +52,23 @@ class Decoder(nn.Module):
                                       next_depth,
                                       k=3,
                                       bn_d=self.bn_d))
+      self.upconvs.append(ConvBnRelu(current_depth,
+                                     current_depth,
+                                     k=3,
+                                     bn_d=self.bn_d))
       current_depth = next_depth
 
   def forward(self, features, skips):
     features = self.ASPP(features)
     current_os = self.backbone_OS
     # do one upconv and one residual
-    for mixconv in self.mixconvs:
+    for mixconv, upconv in zip(self.mixconvs, self.upconvs):
       current_os //= 2
       # upconv (convolution + upsampling)
-      features = F.interpolate(features, scale_factor=2)  # upsample to match skip
-      # add from skip (no grad)
-      features = torch.cat([features, skips[current_os].detach()], dim=1)
+      features = F.interpolate(features, scale_factor=2, align_corners=False, mode='bilinear')  # upsample to match skip
+      features = upconv(features)
+      # add from skip
+      features = torch.cat([features, skips[current_os]], dim=1)
       # do mixing of lower and higher levels
       features = mixconv(features)
     return features

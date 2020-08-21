@@ -3,6 +3,7 @@
 
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 
 
 class HeadConfig():
@@ -26,7 +27,8 @@ class Head(nn.Module):
           m.bias = nn.Parameter(self.weights)
 
   def forward(self, input):
-    return self.head(input)
+      x = self.head(input)
+      return F.interpolate(x, scale_factor=4, align_corners=False, mode='bilinear')
 
 
 class DecoderConfig():

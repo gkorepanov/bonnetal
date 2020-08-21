@@ -62,7 +62,7 @@ class Trainer():
                                       img_stds=self.CFG["dataset"]["img_stds"],
                                       classes=self.CFG["dataset"]["labels"],
                                       train=True,
-				      crop_prop=self.CFG["train"]["crop_prop"],
+                                      crop_prop=self.CFG["train"]["crop_prop"],
                                       location=self.CFG["dataset"]["location"],
                                       batch_size=self.CFG["train"]["batch_size"],
                                       workers=self.CFG["dataset"]["workers"])
@@ -381,7 +381,6 @@ class Trainer():
 
           # now average the head
           for i, head in enumerate(self.best_heads):
-            print
             # for each weight key
             for key, val in head.items():
               # if it is the first time, zero the entry first
@@ -523,6 +522,9 @@ class Trainer():
                   data_time=data_time, loss=losses, acc=acc, iou=iou, lr=lr,
                   umean=update_mean, ustd=update_std))
 
+      if i % self.CFG['train']['report_batch_val'] == 0:
+          print('Placeholder for validation during epoch')
+
       # step scheduler
       scheduler.step()
 
@@ -592,11 +594,12 @@ class Trainer():
 
   def make_log_image(self, input, pred, target):
     # colorize and put in format
-    input = self.parser.get_inv_normalize()(input)*255
+    input_mask = input[3].cpu().numpy()
+    input = self.parser.get_inv_normalize()(input[:3])*255
     input = input.cpu().numpy().transpose(1, 2, 0)
     pred = pred.cpu().numpy().argmax(0)
     target = target.cpu().numpy()
-    output = np.concatenate((pred, target), axis=1)
+    output = np.concatenate((input_mask, pred, target), axis=1)
     output = self.colorizer.do(output)
 
     return np.concatenate((input, output), axis=1)

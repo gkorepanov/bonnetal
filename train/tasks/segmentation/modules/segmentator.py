@@ -31,7 +31,7 @@ class Segmentator(nn.Module):
                                          weights_online=self.weights_online)
 
     # do a pass of the backbone to initialize the skip connections
-    stub = torch.zeros((1, 3, self.backbone_cfg.h, self.backbone_cfg.w))
+    stub = torch.zeros((1, self.backbone_cfg.d, self.backbone_cfg.h, self.backbone_cfg.w))
     if torch.cuda.is_available():
       self.backbone.cuda()
       stub = stub.cuda()

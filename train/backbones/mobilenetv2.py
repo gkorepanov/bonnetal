@@ -7,6 +7,17 @@ import math
 import common.layers as lyr
 import torch.utils.model_zoo as model_zoo
 
+from enum import IntEnum
+
+
+class LayerParam(IntEnum):
+    EXPAND_RATIO = 0
+    CHANNELS = 1
+    INV_BLOCKS = 2
+    STRIDE = 3
+    DILATION = 4
+    BLOCK_TYPE = 5
+
 
 class Backbone(nn.Module):
   def __init__(self, input_size=[224, 224, 3], OS=32, dropout=0.0, bn_d=0.1, extra=None, weights_online=True):
@@ -27,6 +38,12 @@ class Backbone(nn.Module):
         [6, 160, 3, 2, 1, "inv_res"],
         [6, 320, 1, 1, 1, "inv_res"]
     ]
+
+    if extra.get('prune_last_layer'):
+      self.layers[-1][LayerParam.EXPAND_RATIO] = 4
+
+    if extra.get('aggressive_downsample'):
+        self.layers[0][LayerParam.STRIDE] *= 2
 
     # check current stride
     current_os = 1
@@ -78,15 +95,21 @@ class Backbone(nn.Module):
 
     # building model from inverted residuals
     self.features = []
-
+    self.skip_stages = [0]
+    stage = 0
     # build all layers except last
     for t, c, n, s, d, ty in self.new_layers:
       if ty == "input":
         next_depth = int(c * self.width_mult)
+        if extra.get('aggressive_downsample'):
+            kernel_size = 11
+        else:
+            kernel_size = 3
         self.features.append(lyr.ConvBnRelu(self.last_depth, next_depth,
-                                            k=3, stride=s, dilation=d,
+                                            k=kernel_size, stride=s, dilation=d,
                                             bn_d=self.bn_d))
         self.last_depth = next_depth
+        stage += 1
 
       elif ty == "inv_res":
         next_depth = int(c * self.width_mult)
@@ -94,11 +117,14 @@ class Backbone(nn.Module):
         for i in range(n):
           # if it is the first one, do stride
           if i == 0:
+            if s != 1:
+              self.skip_stages.append(stage)
             self.features.append(lyr.InvertedResidual(
                 self.last_depth, next_depth, s, d, t, dropout, self.bn_d))
           else:
             self.features.append(lyr.InvertedResidual(
                 self.last_depth, next_depth, 1, d, t, dropout, self.bn_d))
+          stage += 1
           self.last_depth = next_depth
       else:
         print("unrecognized layer")
@@ -138,21 +164,15 @@ class Backbone(nn.Module):
         print("Can't get bonnetal weights for backbone due to different input depth")
 
   def forward(self, x):
-    # store for skip connections
-    skips = {}
-    # run cnn
-    current_os = 1
-    for layer in self.features:
-      y = layer(x)
-      if y.shape[2] < x.shape[2] or y.shape[3] < x.shape[3]:
-        # only equal downsampling is contemplated
-        assert(x.shape[2] // y.shape[2] == x.shape[3] // y.shape[3])
-        skips[current_os] = x.detach()
-        current_os *= 2
-      x = y
+    input_size = x.shape[2]
+    skip_features = [(1, x)]
 
-    # for key in skips.keys():
-    #   print(key, skips[key].shape)
+    for layer in self.features:
+      x = layer(x)
+      stride = int(input_size // x.shape[2])
+      skip_features.append((stride, x))
+
+    skips = {skip_features[i][0]: skip_features[i][1] for i in self.skip_stages}
 
     return x, skips
 
