@@ -31,7 +31,7 @@ def make_image_augmenter(scale, crop_size):
         iaa.Affine(scale=scale, fit_output=True),
         iaa.size.CropToFixedSize(w, h),
         iaa.size.PadToFixedSize(w, h),
-        iaa.Sometimes(0.3, iaa.MotionBlur(k=(3, 7))),
+        iaa.Sometimes(0.2, iaa.MotionBlur(k=(3, 7))),
         iaa.Sometimes(0.1, iaa.OneOf([
             iaa.Sequential([
                 iaa.AdditiveGaussianNoise(loc=0, scale=(0.0, 15), per_channel=True),
@@ -41,7 +41,9 @@ def make_image_augmenter(scale, crop_size):
     ], random_order=False)
 
 
-def make_input_mask_augmenter():
+def make_input_mask_augmenter(crop_size):
+    h, w = crop_size
+
     def dilate(segmaps, random_state, parents, hooks):
         result = []
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
@@ -55,20 +57,24 @@ def make_input_mask_augmenter():
 
     return iaa.Sequential([
         iaa.Lambda(func_segmentation_maps=dilate),
-        iaa.Sometimes(0.1,
+        iaa.Sometimes(0.2,
             iaa.Lambda(func_segmentation_maps=drop), # no mask at all
             iaa.Sometimes(0.1,
                 [  # failure case
-                    iaa.PiecewiseAffine(scale=(0.02, 0.1), nb_rows=(2, 4), nb_cols=(2, 4)),
-                    iaa.ElasticTransformation(alpha=(0, 70), sigma=(4, 8))
+                   iaa.Affine(scale=(0.8, 1.2), translate_percent=(0, 0.2)),
+                   iaa.ElasticTransformation(alpha=(40, 200), sigma=(5, 20))
                 ],
                 [  # normal case
-                    iaa.PiecewiseAffine(scale=iap.Absolute(iap.TruncatedNormal(0, 0.01, low=-0.04, high=0.04)), nb_rows=(2, 4), nb_cols=(2, 4)),
-                    iaa.ElasticTransformation(alpha=(0, 4), sigma=(4, 8))
+                   iaa.Affine(
+                       scale=iap.Normal(loc=1, scale=0.01),
+                       translate_percent=iap.Absolute(iap.Normal(loc=0, scale=0.01)),
+                       shear=iap.Absolute(iap.Normal(loc=0, scale=1)),
+		       backend='cv2'
+                   ),
                 ]
-            )
+            ),
         )
-    ])
+    ], random_order=False)
 
 
 class SegmentationAugmenter:
@@ -76,23 +82,33 @@ class SegmentationAugmenter:
         super().__init__()
         self.image_augmenter = make_image_augmenter(scale=scale, crop_size=crop_size)
         if is_augment_input_mask:
-            self.input_mask_augmenter = make_input_mask_augmenter()
+            self.input_mask_augmenter = make_input_mask_augmenter(crop_size=crop_size)
         self.is_augment_input_mask = is_augment_input_mask
+        def fix(x):
+            if x.shape == crop_size:
+                return x
+            return cv2.resize(x.astype(np.uint8), tuple(reversed(crop_size)), interpolation=cv2.INTER_LINEAR)
+        self.fix = fix
 
     def to_imgaug_format(self, image, label):
         image = np.array(image)
+        label = np.array(label, dtype=np.uint8)
         segmap = SegmentationMapsOnImage(label, image.shape)
         return image, segmap
 
     def run_augmentations(self, image, label, seed=None):
+        if len(image.shape) == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        image = image[..., :3]
         image, segmap = self.to_imgaug_format(image, label)
         self.init_random_state(seed)
 
         image, segmap = self.image_augmenter(image=image, segmentation_maps=segmap)
-        output_segmap = segmap.arr
+        output_segmap = self.fix(segmap.arr)
 
         if self.is_augment_input_mask:
-            input_segmap = self.input_mask_augmenter(segmentation_maps=segmap).arr
+            input_segmap = self.input_mask_augmenter(segmentation_maps=segmap)
+            input_segmap = self.fix(input_segmap.arr)
         else:
             input_segmap = None
 
@@ -110,27 +126,26 @@ class SegmentationAugmenter:
 
 class COCOPersonDataset:
     def __init__(self, root_dir: str, is_train: bool):
-        subset = 'train2017' if is_train else 'val_2017'
+        subset = 'train2017' if is_train else 'val2017'
 
         from pycocotools.coco import COCO
         self.images_directory = f'{root_dir}/{subset}'
-        self.annotations_file = f'{root_dir}/annotations/{subset}.json'
-        self.coco = COCO(annotations_file)
+        self.annotations_file = f'{root_dir}/annotations/instances_{subset}.json'
+        self.coco = COCO(self.annotations_file)
         self.filter_classes = self.coco.getCatIds(catNms=['person'])
         self.image_ids = self.coco.getImgIds(catIds=self.filter_classes)
 
     def __getitem__(self, index):
         coco_img = self.coco.loadImgs(self.image_ids[index])[0]
-        image = imageio.imread(f"{self.images_directory} / {coco_img['file_name']}")
+        image = imageio.imread(f"{self.images_directory}/{coco_img['file_name']}")
         annotations_ids = self.coco.getAnnIds(imgIds=coco_img['id'], catIds=self.filter_classes, iscrowd=None)
-        coco_annotations = coco.loadAnns(annotations_ids)
-        filterClasses = ['person']
+        coco_annotations = self.coco.loadAnns(annotations_ids)
         mask = np.zeros((coco_img['height'], coco_img['width']))
         for annotation in coco_annotations:
             if annotation['category_id'] not in self.filter_classes:
                 continue
-            mask[coco.annToMask(annotation)] = 1
-        return image, mask, abs(hash(coco_img['file_name']))
+            mask[self.coco.annToMask(annotation).astype(bool)] = 1
+        return image, mask
 
     def __len__(self):
         return len(self.image_ids)
@@ -142,8 +157,8 @@ def make_normalizer(means, stds):
 
 def make_inv_normalizer(means, stds):
     return torchvision.transforms.Compose([
-        torchvision.transforms.Normalize(mean = [ 0., 0., 0. ], std = 1 / np.array(self.img_stds)),
-        torchvision.transforms.Normalize(mean = -np.array(self.img_means), std = [ 1., 1., 1. ]),
+        torchvision.transforms.Normalize(mean = [ 0., 0., 0. ], std = 1 / np.array(stds)),
+        torchvision.transforms.Normalize(mean = -np.array(means), std = [ 1., 1., 1. ]),
     ])
 
 
@@ -161,20 +176,23 @@ class AugmenetedSegmentationDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        image, mask, seed = self.dataset[index]
+        image, mask = self.dataset[index]
 
         if self.is_train:
             seed = None
+        else:
+            seed = index
 
         image, target_mask, input_mask = self.augmenter.run_augmentations(image, mask, seed)
         image = self.normalizer(self.tensorize_image(image))
         target_mask = self.tensorize_mask(target_mask)
 
         if input_mask is not None:
+            input_mask = self.tensorize_mask(input_mask)
             input = torch.cat([
                 image,
-                self.tensorize_mask(input_mask).unsqueeze(0).unsqueeze(0)
-            ], dim=1)
+                input_mask.unsqueeze(0)
+            ], dim=0)
         else:
             input = image
 

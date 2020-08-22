@@ -1,7 +1,6 @@
 # training parameters
 train:
   loss: "xentropy"       # must be either xentropy or iou
-  mask_propagation: True
   max_epochs: 300
   max_lr: 0.01           # sgd learning rate max
   min_lr: 0.001          # warmup initial learning rate
@@ -56,7 +55,7 @@ head:
 dataset:
   name: "persons_augmented_v3"
   location:
-   - /home/g-korepanov/datasets/coco/
+   - /home/g-korepanov/datasets/coco
   workers: 24 # number of threads to get data
   img_means: # rgb
     - 0.46992042

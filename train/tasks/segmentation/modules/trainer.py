@@ -594,7 +594,7 @@ class Trainer():
 
   def make_log_image(self, input, pred, target):
     # colorize and put in format
-    input_mask = input[3].cpu().numpy()
+    input_mask = input[3].cpu().numpy().astype(np.uint8)
     input = self.parser.get_inv_normalize()(input[:3])*255
     input = input.cpu().numpy().transpose(1, 2, 0)
     pred = pred.cpu().numpy().argmax(0)
