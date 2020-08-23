@@ -44,35 +44,74 @@ def make_image_augmenter(scale, crop_size):
 def make_input_mask_augmenter(crop_size):
     h, w = crop_size
 
-    def dilate(segmaps, random_state, parents, hooks):
+    def morph_close(segmaps, random_state, parents, hooks):
         result = []
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         for segmap in segmaps:
             arr = cv2.morphologyEx(segmap.arr.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
             result.append(SegmentationMapsOnImage(arr, shape=arr.shape))
         return result
+    
+    def make_morph_operation(operation, min_coef=0, max_coef=0.2):
+        def f(segmaps, random_state, parents, hooks):
+            result = []
+            for segmap in segmaps:
+                mask = segmap.arr
+                indices = np.where(np.any(mask, axis=1))[0]
+                if len(indices) == 0:
+                    result.append(segmap)
+                    continue
+                h = indices[-1] - indices[0]
+                
+                indices = np.where(np.any(mask, axis=0))[0]
+                if len(indices) == 0:
+                    result.append(segmap)
+                    continue
 
-    def drop(segmaps, random_state, parents, hooks):
-        return [SegmentationMapsOnImage(np.zeros_like(x.arr), shape=x.arr.shape) for x in segmaps]
+                w = indices[-1] - indices[0]
+
+                size = min(h, w)
+
+                low = max(2, int(size * min_coef))
+                high = max(low + 1, int(size * max_coef))
+                kernel_size = np.random.randint(low, high)
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+                mask = operation(mask.astype(np.uint8), kernel)
+                result.append(SegmentationMapsOnImage(mask, shape=mask.shape))
+            return result
+        return f
 
     return iaa.Sequential([
-        iaa.Lambda(func_segmentation_maps=dilate),
-        iaa.Sometimes(0.2,
-            iaa.Lambda(func_segmentation_maps=drop), # no mask at all
-            iaa.Sometimes(0.1,
-                [  # failure case
-                   iaa.Affine(scale=(0.8, 1.2), translate_percent=(0, 0.2)),
-                   iaa.ElasticTransformation(alpha=(40, 200), sigma=(5, 20))
-                ],
-                [  # normal case
-                   iaa.Affine(
-                       scale=iap.Normal(loc=1, scale=0.01),
-                       translate_percent=iap.Absolute(iap.Normal(loc=0, scale=0.01)),
-                       shear=iap.Absolute(iap.Normal(loc=0, scale=1)),
-		       backend='cv2'
-                   ),
-                ]
-            ),
+        iaa.Lambda(func_segmentation_maps=morph_close),
+        iaa.Sometimes(0.15,
+            # failed mask
+            iaa.OneOf([
+                iaa.TotalDropout(1.0), # no mask at all
+                iaa.Sequential([
+                    iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.erode, min_coef=0.2, max_coef=0.5)),
+                    iaa.Affine(translate_percent=(-0.4, 0.4))
+                ])
+            ]),
+
+            # normal mask
+            iaa.Sequential([
+                iaa.Sometimes(0.1, iaa.OneOf([
+                    iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.erode)),  # smaller mask
+                    iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.dilate)),  # larger mask
+                ])),
+                iaa.Sometimes(1.0, iaa.Affine(
+                    scale=iap.Normal(loc=1, scale=0.02),
+                    translate_percent=iap.Normal(loc=0, scale=0.03),
+                    shear=iap.Normal(loc=0, scale=1),
+                    backend='cv2'
+                )),
+                iaa.Sometimes(0.1,
+                    iaa.ElasticTransformation(alpha=2000, sigma=50)
+                ),
+                iaa.Sometimes(0.1,
+                    iaa.PiecewiseAffine()
+                )
+            ])
         )
     ], random_order=False)
 
@@ -207,9 +246,9 @@ class Parser:
         classes,
         train,
         location,
-        batch_size,
-        workers,
-        crop_prop
+        batch_size=1,
+        workers=1,
+        crop_prop=None
     ):
         self.img_prop = img_prop
         self.classes = classes

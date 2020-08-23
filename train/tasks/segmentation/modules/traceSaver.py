@@ -55,7 +55,9 @@ class TraceSaver():
                                       img_means=self.CFG["dataset"]["img_means"],
                                       img_stds=self.CFG["dataset"]["img_stds"],
                                       classes=self.CFG["dataset"]["labels"],
-                                      train=False)
+                                      train=False,
+			                                location=self.CFG["dataset"]["location"],
+                                      crop_prop=self.CFG["train"]["crop_prop"])
     self.data_h, self.data_w, self.data_d = self.parser.get_img_size()
 
     # get architecture and build backbone (with pretrained weights)
@@ -132,7 +134,7 @@ class TraceSaver():
     with torch.no_grad():
       print("Profiling model")
       print("saving model in ", onnx_path)
-      torch.onnx.export(self.model, self.dummy_input, onnx_path, keep_initializers_as_inputs=False, opset_version=9)
+      torch.onnx.export(self.model, self.dummy_input, onnx_path, keep_initializers_as_inputs=False, opset_version=11)
 
     # check that it worked
     print("Checking that it all worked out")

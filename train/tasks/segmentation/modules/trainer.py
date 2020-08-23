@@ -329,7 +329,7 @@ class Trainer():
         self.info["valid_iou"] = iou
 
         # remember best iou and save checkpoint
-        if iou > best_val_iou and epoch > 10:
+        if iou > best_val_iou and epoch > 5:
           print("Best mean iou in validation so far, save model!")
           print("*" * 80)
           best_val_iou = iou
@@ -547,6 +547,7 @@ class Trainer():
 
     with torch.no_grad():
       end = time.time()
+      save_image_each = len(val_loader) // 15
       for i, (input, target) in enumerate(val_loader):
         if not self.multi_gpu and self.gpu:
           input = input.cuda()
@@ -567,9 +568,8 @@ class Trainer():
         batch_time.update(time.time() - end)
         end = time.time()
 
-      # save a random image, if desired
-      if(save_images):
-        for j in range(5):
+        # save a random image, if desired
+        if save_images and (i % save_image_each == 0):
           index = np.random.randint(0, input.shape[0] - 1)
           rand_imgs.append(self.make_log_image(input[index], output[index], target[index]))
 
