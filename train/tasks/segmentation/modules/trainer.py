@@ -329,7 +329,7 @@ class Trainer():
         self.info["valid_iou"] = iou
 
         # remember best iou and save checkpoint
-        if iou > best_val_iou and epoch > 0:
+        if iou > best_val_iou and epoch > 1:
           print("Best mean iou in validation so far, save model!")
           print("*" * 80)
           best_val_iou = iou
@@ -594,12 +594,17 @@ class Trainer():
 
   def make_log_image(self, input, pred, target):
     # colorize and put in format
-    input_mask = input[3].cpu().numpy().astype(np.uint8)
-    input = self.parser.get_inv_normalize()(input[:3])*255
+    prev_mask = input[3].cpu().numpy().astype(np.uint8)
+    input = self.parser.get_inv_normalize()(input[:3]) * 255
     input = input.cpu().numpy().transpose(1, 2, 0)
     pred = pred.cpu().numpy().argmax(0)
     target = target.cpu().numpy()
-    output = np.concatenate((input_mask, pred, target), axis=1)
-    output = self.colorizer.do(output)
 
-    return np.concatenate((input, output), axis=1)
+    target_diff = self.colorizer.do(target - prev_mask)
+    pred_diff = self.colorizer.do(pred - prev_mask)
+    prev_mask = self.colorizer.do(prev_mask)
+    target = self.colorizer.do(target)
+    pred = self.colorizer.do(pred)
+    sep = np.ones((input.shape[0], 2, 3)) * 255
+  
+    return np.concatenate([input, prev_mask, sep, target, sep, target_diff, sep, pred, sep, pred_diff], axis=1).astype(np.uint8)

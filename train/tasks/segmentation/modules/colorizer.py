@@ -14,6 +14,6 @@ class Colorizer:
 
   def do(self, argmax):
     # make color image
-    color_image = self.lut[argmax]
+    color_image = self.lut[argmax.astype(np.int32)]
 
     return color_image

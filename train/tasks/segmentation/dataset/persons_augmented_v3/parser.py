@@ -40,19 +40,34 @@ def make_image_augmenter(scale, crop_size):
     ], random_order=False)
 
 
-def make_input_mask_augmenter(crop_size):
+def make_prev_augmenter(crop_size):
     h, w = crop_size
 
-    def total_dropout(segmaps, random_state, parents, hooks):
+    def choose_random_objects(segmaps, random_state, parents, hooks):
         result = []
         for segmap in segmaps:
             mask = segmap.arr
-            if np.random.random() > 0.5:
-                mask = np.zeros_like(mask)
-            else:
-                mask = np.ones_like(mask)
-            result.append(SegmentationMapsOnImage(mask, shape=mask.shape))
+            classes = [x for x in np.unique(mask) if x != 1]
+            num_classes_to_choose = np.random.randint(min(1, len(classes)), len(classes) + 1)
+            classes_to_choose = list(np.random.choice(classes, num_classes_to_choose, replace=False))
+            if np.random.random() > 0.1:
+                classes_to_choose.append(1)
+            # print(classes, num_classes_to_choose, classes_to_choose)
+            mask = np.isin(mask, classes_to_choose)
+            result.append(SegmentationMapsOnImage(mask.astype(np.uint8), shape=mask.shape))
         return result
+
+
+    # def total_dropout(segmaps, random_state, parents, hooks):
+    #     result = []
+    #     for segmap in segmaps:
+    #         mask = segmap.arr
+    #         if np.random.random() > 0.5:
+    #             mask = np.zeros_like(mask)
+    #         else:
+    #             mask = np.ones_like(mask)
+    #         result.append(SegmentationMapsOnImage(mask, shape=mask.shape))
+    #     return result
 
     def morph_close(segmaps, random_state, parents, hooks):
         result = []
@@ -72,16 +87,13 @@ def make_input_mask_augmenter(crop_size):
                     result.append(segmap)
                     continue
                 h = indices[-1] - indices[0]
-                
                 indices = np.where(np.any(mask, axis=0))[0]
                 if len(indices) == 0:
                     result.append(segmap)
                     continue
-
                 w = indices[-1] - indices[0]
 
                 size = min(h, w)
-
                 low = max(2, int(size * min_coef))
                 high = max(low + 1, int(size * max_coef))
                 kernel_size = np.random.randint(low, high)
@@ -92,11 +104,12 @@ def make_input_mask_augmenter(crop_size):
         return f
 
     return iaa.Sequential([
+        iaa.Sometimes(0.2, iaa.Lambda(func_segmentation_maps=choose_random_objects)),
         iaa.Lambda(func_segmentation_maps=morph_close),
-        iaa.Sometimes(0.15,
+        iaa.Sometimes(0.2,
             # failed mask
             iaa.OneOf([
-                iaa.Lambda(func_segmentation_maps=total_dropout),  # fill image
+                iaa.TotalDropout(1.0),  # fill image
                 iaa.Sequential([  # fail mask
                     iaa.OneOf([
                         iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.erode, min_coef=0.2, max_coef=0.5)),
@@ -130,20 +143,18 @@ def make_input_mask_augmenter(crop_size):
 
 
 class SegmentationAugmenter:
-    def __init__(self, scale, crop_size, is_augment_input_mask: bool):
+    def __init__(self, scale, crop_size, is_gen_prev_mask: bool, is_gen_prev_img: bool):
         super().__init__()
         h, w = crop_size
         self.image_augmenter = make_image_augmenter(scale=scale, crop_size=crop_size)
-        if is_augment_input_mask:
-            self.input_mask_augmenter = make_input_mask_augmenter(crop_size=crop_size)
-        self.is_augment_input_mask = is_augment_input_mask
+        self.prev_augmenter = make_prev_augmenter(crop_size=crop_size)
+        self.is_gen_prev_mask = is_gen_prev_mask
         self.pad = iaa.size.PadToFixedSize(w, h)
-        def fix(x):
-            if x.shape[:2] == crop_size:
-                return x
-            # print(f"Fixing dims: {x.shape}" )
-            return cv2.resize(x.astype(np.uint8), tuple(reversed(crop_size)), interpolation=cv2.INTER_LINEAR)
-        self.fix = fix
+        def mask_postprocess(x):
+            x = (x == 1).astype(np.uint8)
+            if x.shape[:2] == crop_size: return x
+            return cv2.resize(x, tuple(reversed(crop_size)), interpolation=cv2.INTER_LINEAR)
+        self.mask_postprocess = mask_postprocess
 
     def to_imgaug_format(self, image, label):
         image = np.array(image)
@@ -157,16 +168,15 @@ class SegmentationAugmenter:
         image = image[..., :3]
         image, segmap = self.to_imgaug_format(image, label)
         self.init_random_state(seed)
-
         pad = self.pad.to_deterministic()
 
         image, segmap = self.image_augmenter(image=image, segmentation_maps=segmap)
         image, output_segmap = pad(image=image, segmentation_maps=segmap)
-        output_segmap = self.fix(output_segmap.arr)
+        output_segmap = self.mask_postprocess(output_segmap.arr)
 
-        if self.is_augment_input_mask:
-            input_segmap = self.input_mask_augmenter(segmentation_maps=segmap)
-            input_segmap = self.fix(pad(segmentation_maps=input_segmap).arr)
+        if self.is_gen_prev_mask:
+            input_segmap = self.prev_augmenter(segmentation_maps=segmap)
+            input_segmap = self.mask_postprocess(pad(segmentation_maps=input_segmap).arr)
         else:
             input_segmap = None
 
@@ -196,13 +206,11 @@ class COCOPersonDataset:
     def __getitem__(self, index):
         coco_img = self.coco.loadImgs(self.image_ids[index])[0]
         image = imageio.imread(f"{self.images_directory}/{coco_img['file_name']}")
-        annotations_ids = self.coco.getAnnIds(imgIds=coco_img['id'], catIds=self.filter_classes, iscrowd=None)
+        annotations_ids = self.coco.getAnnIds(imgIds=coco_img['id'], catIds=[], iscrowd=None)
         coco_annotations = self.coco.loadAnns(annotations_ids)
         mask = np.zeros((coco_img['height'], coco_img['width']))
         for annotation in coco_annotations:
-            if annotation['category_id'] not in self.filter_classes:
-                continue
-            mask[self.coco.annToMask(annotation).astype(bool)] = 1
+            mask[self.coco.annToMask(annotation).astype(bool)] = annotation['category_id']
         return image, mask
 
     def __len__(self):
@@ -241,15 +249,15 @@ class AugmenetedSegmentationDataset(Dataset):
         else:
             seed = index
 
-        image, target_mask, input_mask = self.augmenter.run_augmentations(image, mask, seed)
+        image, target_mask, prev_mask = self.augmenter.run_augmentations(image, mask, seed)
         image = self.normalizer(self.tensorize_image(image))
         target_mask = self.tensorize_mask(target_mask)
 
-        if input_mask is not None:
-            input_mask = self.tensorize_mask(input_mask)
+        if prev_mask is not None:
+            prev_mask = self.tensorize_mask(prev_mask)
             input = torch.cat([
                 image,
-                input_mask.unsqueeze(0)
+                prev_mask.unsqueeze(0)
             ], dim=0)
         else:
             input = image
@@ -278,7 +286,8 @@ class Parser:
         augmenter = SegmentationAugmenter(
             scale=(0.5, 2),
             crop_size=(crop_prop['height'], crop_prop['width']),
-            is_augment_input_mask=True
+            is_gen_prev_mask=True,
+            is_gen_prev_img=False
         )
         coco_val = COCOPersonDataset(root_dir=location[0], is_train=False)
         coco_train = COCOPersonDataset(root_dir=location[0], is_train=True)
