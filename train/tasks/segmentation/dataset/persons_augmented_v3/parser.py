@@ -104,7 +104,7 @@ def make_prev_augmenter(crop_size):
         return f
 
     return iaa.Sequential([
-        iaa.Sometimes(0.2, iaa.Lambda(func_segmentation_maps=choose_random_objects)),
+        iaa.Sometimes(0.25, iaa.Lambda(func_segmentation_maps=choose_random_objects)),
         iaa.Lambda(func_segmentation_maps=morph_close),
         iaa.Sometimes(0.2,
             # failed mask

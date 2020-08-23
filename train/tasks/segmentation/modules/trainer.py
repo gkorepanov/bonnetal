@@ -66,6 +66,11 @@ class Trainer():
                                       location=self.CFG["dataset"]["location"],
                                       batch_size=self.CFG["train"]["batch_size"],
                                       workers=self.CFG["dataset"]["workers"])
+    
+    print(f"TRAIN size: {len(self.parser.get_train_set())}; VALID size: {len(self.parser.get_valid_set())}")
+    self.save_image_each = len(self.parser.get_valid_set()) // 30
+    assert self.save_image_each > 0
+    print(f"Will save an image each {self.save_image_each} batch")
 
     self.data_h, self.data_w, self.data_d = self.parser.get_img_size()
 
@@ -547,7 +552,6 @@ class Trainer():
 
     with torch.no_grad():
       end = time.time()
-      save_image_each = len(val_loader) // 30
       for i, (input, target) in enumerate(val_loader):
         if not self.multi_gpu and self.gpu:
           input = input.cuda()
@@ -569,7 +573,7 @@ class Trainer():
         end = time.time()
 
         # save a random image, if desired
-        if save_images and (i % save_image_each == 0):
+        if save_images and (i % self.save_image_each == 0):
           index = np.random.randint(0, input.shape[0] - 1)
           rand_imgs.append(self.make_log_image(input[index], output[index], target[index]))
 
