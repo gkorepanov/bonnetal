@@ -30,7 +30,6 @@ def make_image_augmenter(scale, crop_size):
         iaa.Affine(scale={'x': (0.95, 1.05), 'y': 1}, fit_output=True),
         iaa.Affine(scale=scale, fit_output=True),
         iaa.size.CropToFixedSize(w, h),
-        iaa.size.PadToFixedSize(w, h),
         iaa.Sometimes(0.2, iaa.MotionBlur(k=(3, 7))),
         iaa.Sometimes(0.1, iaa.OneOf([
             iaa.Sequential([
@@ -43,6 +42,17 @@ def make_image_augmenter(scale, crop_size):
 
 def make_input_mask_augmenter(crop_size):
     h, w = crop_size
+
+    def total_dropout(segmaps, random_state, parents, hooks):
+        result = []
+        for segmap in segmaps:
+            mask = segmap.arr
+            if np.random.random() > 0.5:
+                mask = np.zeros_like(mask)
+            else:
+                mask = np.ones_like(mask)
+            result.append(SegmentationMapsOnImage(mask, shape=mask.shape))
+        return result
 
     def morph_close(segmaps, random_state, parents, hooks):
         result = []
@@ -86,10 +96,13 @@ def make_input_mask_augmenter(crop_size):
         iaa.Sometimes(0.15,
             # failed mask
             iaa.OneOf([
-                iaa.TotalDropout(1.0), # no mask at all
-                iaa.Sequential([
-                    iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.erode, min_coef=0.2, max_coef=0.5)),
-                    iaa.Affine(translate_percent=(-0.4, 0.4))
+                iaa.Lambda(func_segmentation_maps=total_dropout),  # fill image
+                iaa.Sequential([  # fail mask
+                    iaa.OneOf([
+                        iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.erode, min_coef=0.2, max_coef=0.5)),
+                        iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.dilate, min_coef=0.2, max_coef=0.5)),
+                    ]),
+                    iaa.Affine(translate_percent=iap.Choice([iap.Uniform(-0.5, -0.2), iap.Uniform(0.2, 0.5)]))
                 ])
             ]),
 
@@ -119,13 +132,16 @@ def make_input_mask_augmenter(crop_size):
 class SegmentationAugmenter:
     def __init__(self, scale, crop_size, is_augment_input_mask: bool):
         super().__init__()
+        h, w = crop_size
         self.image_augmenter = make_image_augmenter(scale=scale, crop_size=crop_size)
         if is_augment_input_mask:
             self.input_mask_augmenter = make_input_mask_augmenter(crop_size=crop_size)
         self.is_augment_input_mask = is_augment_input_mask
+        self.pad = iaa.size.PadToFixedSize(w, h)
         def fix(x):
-            if x.shape == crop_size:
+            if x.shape[:2] == crop_size:
                 return x
+            # print(f"Fixing dims: {x.shape}" )
             return cv2.resize(x.astype(np.uint8), tuple(reversed(crop_size)), interpolation=cv2.INTER_LINEAR)
         self.fix = fix
 
@@ -142,12 +158,15 @@ class SegmentationAugmenter:
         image, segmap = self.to_imgaug_format(image, label)
         self.init_random_state(seed)
 
+        pad = self.pad.to_deterministic()
+
         image, segmap = self.image_augmenter(image=image, segmentation_maps=segmap)
-        output_segmap = self.fix(segmap.arr)
+        image, output_segmap = pad(image=image, segmentation_maps=segmap)
+        output_segmap = self.fix(output_segmap.arr)
 
         if self.is_augment_input_mask:
             input_segmap = self.input_mask_augmenter(segmentation_maps=segmap)
-            input_segmap = self.fix(input_segmap.arr)
+            input_segmap = self.fix(pad(segmentation_maps=input_segmap).arr)
         else:
             input_segmap = None
 
