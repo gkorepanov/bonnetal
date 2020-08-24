@@ -11,7 +11,7 @@ class OneShot_LR(toptim._LRScheduler):
       exponential decay with base "post_decay", as is the case with most cnn training.
   """
 
-  def __init__(self, optimizer, base_lr, max_lr, step_size_up, step_size_down, cycle_momentum, base_momentum, max_momentum, post_decay):
+  def __init__(self, optimizer, base_lr, max_lr, step_size_up, step_size_down, cycle_momentum, base_momentum, max_momentum, post_decay, last_epoch=-1):
     # cyclic params
     self.optimizer = optimizer
     self.initial_lr = base_lr
@@ -37,13 +37,13 @@ class OneShot_LR(toptim._LRScheduler):
                                              step_size_down=self.step_size_down,
                                              cycle_momentum=self.cycle_momentum,
                                              base_momentum=self.base_momentum,
-                                             max_momentum=self.max_momentum)
+                                             max_momentum=self.max_momentum,
+                                             last_epoch=last_epoch)
 
     # our params
-    self.last_epoch = -1  # fix for pytorch 1.1 and below
     self.oneshot_n = self.step_size_up + self.step_size_down   # steps to warm up for
     self.finished = False  # am i done
-    super().__init__(optimizer)
+    super().__init__(optimizer, last_epoch=last_epoch)
 
   def get_lr(self):
     return [self.initial_lr * (self.post_decay ** self.last_epoch) for lr in self.base_lrs]

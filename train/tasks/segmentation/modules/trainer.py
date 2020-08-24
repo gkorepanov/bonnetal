@@ -193,7 +193,8 @@ class Trainer():
                                 cycle_momentum=True,
                                 base_momentum=self.CFG["train"]["min_momentum"],
                                 max_momentum=self.CFG["train"]["max_momentum"],
-                                post_decay=final_decay)
+                                post_decay=final_decay,
+                                last_epoch=self.CFG["train"].get("last_epoch", -1))
 
     # buffer to save the best N models
     self.best_n_models = self.CFG["train"]["avg_N"]
@@ -610,5 +611,12 @@ class Trainer():
     target = self.colorizer.do(target)
     pred = self.colorizer.do(pred)
     sep = np.ones((input.shape[0], 2, 3)) * 255
-  
-    return np.concatenate([input, prev_mask, sep, target, sep, target_diff, sep, pred, sep, pred_diff], axis=1).astype(np.uint8)
+
+    return np.concatenate([
+        input,
+        prev_mask * 0.5 + input * 0.5,
+        sep, target * 0.5 + input * 0.5,
+        sep, target_diff * 0.5 + input * 0.5,
+        sep, pred * 0.5 + input * 0.5,
+        sep, pred_diff * 0.5 + input * 0.5
+    ], axis=1).astype(np.uint8)
