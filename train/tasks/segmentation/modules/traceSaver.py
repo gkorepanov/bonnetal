@@ -47,25 +47,12 @@ class TraceSaver():
       print("WARNING: FORCING IMAGE PROPERTIES TO")
       print(self.CFG["dataset"]["img_prop"])
 
-    # get the data
-    parserModule = imp.load_source("parserModule",
-                                   booger.TRAIN_PATH + '/tasks/segmentation/dataset/' +
-                                   self.CFG["dataset"]["name"] + '/parser.py')
-    self.parser = parserModule.Parser(img_prop=self.CFG["dataset"]["img_prop"],
-                                      img_means=self.CFG["dataset"]["img_means"],
-                                      img_stds=self.CFG["dataset"]["img_stds"],
-                                      classes=self.CFG["dataset"]["labels"],
-                                      train=False,
-			                                location=self.CFG["dataset"]["location"],
-                                      crop_prop=self.CFG["train"]["crop_prop"])
-    self.data_h, self.data_w, self.data_d = self.parser.get_img_size()
-
     # get architecture and build backbone (with pretrained weights)
     self.bbone_cfg = BackboneConfig(name=self.CFG["backbone"]["name"],
                                     os=self.CFG["backbone"]["OS"],
-                                    h=self.data_h,
-                                    w=self.data_w,
-                                    d=self.data_d,
+                                    h=self.CFG["dataset"]["img_prop"]["height"],
+                                    w=self.CFG["dataset"]["img_prop"]["width"],
+                                    d=self.CFG["dataset"]["img_prop"]["depth"],
                                     dropout=self.CFG["backbone"]["dropout"],
                                     bn_d=self.CFG["backbone"]["bn_d"],
                                     extra=self.CFG["backbone"]["extra"])
@@ -75,7 +62,7 @@ class TraceSaver():
                                      bn_d=self.CFG["decoder"]["bn_d"],
                                      extra=self.CFG["decoder"]["extra"])
 
-    self.head_cfg = HeadConfig(n_class=self.parser.get_n_classes() - 1,
+    self.head_cfg = HeadConfig(n_class=len(self.CFG["dataset"]["labels"]) - 1,
                                dropout=self.CFG["head"]["dropout"])
 
     # concatenate the encoder and the head
