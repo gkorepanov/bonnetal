@@ -24,6 +24,11 @@ class Backbone(nn.Module):
     super(Backbone, self).__init__()
     self.width_mult = extra["width_mult"]
     self.shallow_feats = extra["shallow_feats"]
+    self.use_prev_mask = extra["use_prev_mask"]
+    if self.use_prev_mask:
+      assert input_size[-1] == 4
+    else:
+      assert input_size[-1] == 3
     self.bn_d = bn_d
     self.weights_online = weights_online
     # setting of inverted residual blocks
@@ -163,7 +168,12 @@ class Backbone(nn.Module):
       else:
         print("Can't get bonnetal weights for backbone due to different input depth")
 
-  def forward(self, x):
+  def forward(self, x, prev_mask):
+    if self.use_prev_mask:
+      x = torch.cat([
+          x,
+          prev_mask.unsqueeze(0)
+      ], dim=1)
     input_size = x.shape[2]
     skip_features = [(1, x)]
 

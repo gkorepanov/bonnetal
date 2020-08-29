@@ -45,3 +45,24 @@ class mIoULoss(nn.Module):
 
     # Return average loss over batch
     return loss.mean()
+
+
+class DiceLoss(nn.Module):
+    def forward(self, inputs, target):
+        smooth = 1.
+
+        iflat = inputs.view(-1)
+        tflat = target.view(-1)
+        intersection = (iflat * tflat).sum()
+
+        return 1 - ((2. * intersection + smooth) /
+                  (iflat.sum() + tflat.sum() + smooth)))
+
+class CrossEntropyDiceLoss(nn.Module):
+    def __init__(self, weight):
+        super().__init__()
+        self.xentropy = nn.CrossEntropyLoss(weight=weight)
+        self.dice = DiceLoss()
+
+    def forward(self, inputs, target):
+        return self.xentropy(inputs, target) + self.dice(inputs, target)

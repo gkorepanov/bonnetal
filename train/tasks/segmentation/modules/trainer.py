@@ -65,8 +65,12 @@ class Trainer():
                                       crop_prop=self.CFG["train"]["crop_prop"],
                                       location=self.CFG["dataset"]["location"],
                                       batch_size=self.CFG["train"]["batch_size"],
-                                      workers=self.CFG["dataset"]["workers"])
-    
+                                      workers=self.CFG["dataset"]["workers"],
+                                      is_gen_prev_mask=self.CFG["dataset"]["is_gen_prev_mask"],
+                                      is_gen_prev_img=self.CFG["dataset"]["is_gen_prev_img"])
+    self.is_gen_prev_mask = self.CFG["dataset"]["is_gen_prev_mask"]
+    self.is_gen_prev_img = self.CFG["dataset"]["is_gen_prev_img"]
+
     print(f"TRAIN size: {len(self.parser.get_train_set())}; VALID size: {len(self.parser.get_valid_set())}")
     self.save_image_each = len(self.parser.get_valid_set()) // 30
     assert self.save_image_each > 0
@@ -149,21 +153,28 @@ class Trainer():
     if torch.cuda.is_available() and torch.cuda.device_count() > 1:
       print("Let's use", torch.cuda.device_count(), "GPUs!")
       self.model = nn.DataParallel(self.model)   # spread in gpus
-     # self.model = convert_model(self.model).cuda()  # sync batchnorm
+      # self.model = convert_model(self.model).cuda()  # sync batchnorm
       self.model_single = self.model.module  # single model to get weight names
       self.multi_gpu = True
       self.n_gpus = torch.cuda.device_count()
 
     # loss
     if "loss" in self.CFG["train"].keys() and self.CFG["train"]["loss"] == "xentropy":
-      self.criterion = nn.CrossEntropyLoss(weight=self.loss_w).to(self.device)
+      criterion = nn.CrossEntropyLoss(weight=self.loss_w)
     elif "loss" in self.CFG["train"].keys() and self.CFG["train"]["loss"] == "iou":
-      self.criterion = mIoULoss(weight=self.loss_w).to(self.device)
+      criterion = mIoULoss(weight=self.loss_w)
+    elif self.CFG["train"].get("loss") == "xentropy_dice":
+      criterion = CrossEntropyDiceLoss(weight=self.loss_w)
     else:
       raise Exception('Loss not defined in config file')
+
+    self.criterion = criterion.to(self.device)
+    self.criterion_prev_img = nn.MSELoss().to(self.device)
+
     # loss as dataparallel too (more images in batch)
     if self.n_gpus > 1:
-      self.criterion = nn.DataParallel(self.criterion).cuda()  # spread in gpus
+      self.criterion = nn.DataParallel(self.criterion).cuda()
+      self.criterion_prev_img = nn.DataParallel(self.criterion_prev_img).cuda()
 
     # optimizer
     train_dicts = [{'params': self.model_single.head.parameters()}]
@@ -310,16 +321,7 @@ class Trainer():
       self.info["train_update"] = update_mean
       self.info["train_loss"] = loss
       self.info["train_acc"] = acc
-      self.info["train_iou"] = iou
-
-#      # remember best iou and save checkpoint
-#      if iou > best_train_iou:
-#        print("Best mean iou in training set so far, save model!")
-#        best_train_iou = iou
-#        self.save_checkpoint(bbone=self.model_single.backbone.state_dict(),
-#                             decoder=self.model_single.decoder.state_dict(),
-#                             head=self.model_single.head.state_dict(),
-#                             suffix="_train")
+      # self.info["train_iou"] = iou
 
       if epoch % self.CFG["train"]["report_epoch"] == 0:
         # evaluate on validation set
@@ -440,6 +442,33 @@ class Trainer():
 
     return
 
+  def run_single_batch(self, model, batch, criterion, criterion_prev_img):
+      input, target, prev_mask, prev_image_augmenter, prev_image = batch
+      if self.gpu:
+          input = input.cuda()
+          if self.is_gen_prev_mask:
+              prev_mask = prev_mask.cuda()
+          if self.is_gen_prev_img:
+              prev_image = prev_image.cuda(non_blocking=True)
+          target = target.cuda(non_blocking=True).long()
+
+      # compute output
+      output = model(input, prev_mask)
+      categorical_output = torch.cat([1 - output, output], dim=1)
+      loss = criterion(categorical_output, target)
+
+      if self.is_gen_prev_img:
+          output_numpy = output.detach().squeeze().numpy()
+          pseudo_target = torch.from_numpy(prev_image_augmenter(image=output_numpy)).to(torch.float32).squeeze()
+          if self.gpu:
+            pseudo_target = pseudo_target.cuda()
+          prev_output = model(prev_image, None)
+          loss += criterion_prev_img(prev_output.squeeze(), pseudo_target)
+      else:
+          pseudo_target = prev_output = None
+
+      return loss, output, categorical_output, target, prev_output, pseudo_target
+
   def train_epoch(self, train_loader, model, criterion, optimizer, epoch, evaluator, block_bn, scheduler):
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -466,18 +495,14 @@ class Trainer():
           m.eval()
 
     end = time.time()
-    for i, (input, target) in enumerate(train_loader):
+    for i, batch in enumerate(train_loader):
+      input, * = batch
       # measure data loading time
       data_time.update(time.time() - end)
-      if not self.multi_gpu and self.gpu:
-        input = input.cuda()
-      if self.gpu:
-        target = target.cuda(non_blocking=True).long()
 
-      # compute output
-      output = model(input)
-      output = torch.cat([1 - output, output], dim=1)
-      loss = criterion(output, target)
+      loss, _ = self.run_single_batch(
+        model=model, batch=batch, criterion=criterion, criterion_prev_img=self.criterion_prev_img
+      )
 
       # compute gradient and do SGD step
       optimizer.zero_grad()
@@ -556,19 +581,14 @@ class Trainer():
 
     with torch.no_grad():
       end = time.time()
-      for i, (input, target) in enumerate(val_loader):
-        if not self.multi_gpu and self.gpu:
-          input = input.cuda()
-        if self.gpu:
-          target = target.cuda(non_blocking=True).long()
-
-        # compute output
-        output = model(input)
-        output = torch.cat([1 - output, output], dim=1)
-        loss = criterion(output, target)
+      for i, batch in enumerate(val_loader):
+        input, _, prev_mask, _, prev_image = batch
+        loss, output, categorical_output, target, prev_output, pseudo_target = self.run_single_batch(
+          model=model, batch=batch, criterion=criterion, criterion_prev_img=self.criterion_prev_img
+        )
 
         # measure accuracy and record loss
-        evaluator.addBatch(output.argmax(dim=1), target)
+        evaluator.addBatch(categorical_output.argmax(dim=1), target)
         loss = loss.mean()
         losses.update(loss.item(), input.size(0))
 
@@ -579,7 +599,9 @@ class Trainer():
         # save a random image, if desired
         if save_images and (i % self.save_image_each == 0):
           index = np.random.randint(0, input.shape[0] - 1)
-          rand_imgs.append(self.make_log_image(input[index], output[index], target[index]))
+          rand_imgs.append(self.make_log_image(
+            input[index], output[index], prev_mask[index], prev_image[index], target[index], pseudo_target[index], prev_output[index]
+          ))
 
       accuracy = evaluator.getacc()
       jaccard, class_jaccard = evaluator.getIoU()
@@ -600,26 +622,53 @@ class Trainer():
 
     return acc.avg, iou.avg, losses.avg, rand_imgs
 
-  def make_log_image(self, input, pred, target):
-    # colorize and put in format
-    prev_mask = input[3].cpu().numpy().astype(np.uint8)
-    input = self.parser.get_inv_normalize()(input[:3]) * 255
+  def make_log_image(self,
+      input,
+      output,
+      prev_mask,
+      prev_image,
+      target,
+      pseudo_target,
+      prev_output
+  ):
+    input = self.parser.get_inv_normalize()(input) * 255
     input = input.cpu().numpy().transpose(1, 2, 0)
-    pred = pred.cpu().numpy().argmax(0)
+    sep = np.ones((input.shape[0], 2, 3)) * 255
+    pred = (output.cpu().numpy() > 0.5).astype(int)
     target = target.cpu().numpy()
 
-    target_diff = self.colorizer.do(target - prev_mask)
-    pred_diff = self.colorizer.do(pred - prev_mask)
-    prev_mask = self.colorizer.do(prev_mask)
-    target = self.colorizer.do(target)
-    pred = self.colorizer.do(pred)
-    sep = np.ones((input.shape[0], 2, 3)) * 255
+    if prev_mask is not None:
+        raise NotImplementedError()
+        prev_mask = prev_mask.cpu().numpy().astype(np.uint8)
 
-    return np.concatenate([
-        input,
-        prev_mask * 0.5 + input * 0.5,
-        sep, target * 0.5 + input * 0.5,
-        sep, target_diff * 0.5 + input * 0.5,
-        sep, pred * 0.5 + input * 0.5,
-        sep, pred_diff * 0.5 + input * 0.5
-    ], axis=1).astype(np.uint8)
+        target_diff = self.colorizer.do(target - prev_mask)
+        pred_diff = self.colorizer.do(pred - prev_mask)
+        prev_mask = self.colorizer.do(prev_mask)
+        target = self.colorizer.do(target)
+        pred = self.colorizer.do(pred)
+
+        return np.concatenate([
+            input,
+            prev_mask * 0.5 + input * 0.5,
+            sep, target * 0.5 + input * 0.5,
+            sep, target_diff * 0.5 + input * 0.5,
+            sep, pred * 0.5 + input * 0.5,
+            sep, pred_diff * 0.5 + input * 0.5
+        ], axis=1).astype(np.uint8)
+
+    if prev_image is not None:
+        prev_output = (prev_output.cpu().numpy() > 0.5).astype(int)
+        pseudo_target = (pseudo_target.cpu().numpy() > 0.5).astype(int)
+
+        prev_diff = self.colorizer.do(pseudo_target - prev_output)
+        prev_output = self.colorizer.do(prev_output)
+        pseudo_target = self.colorizer.do(pseudo_target)
+
+        return np.concatenate([
+            input,
+            sep, target * 0.5 + input * 0.5,
+            sep, pred * 0.5 + input * 0.5,
+            sep, prev_output * 0.5 + input * 0.5,
+            sep, pseudo_target * 0.5 + input * 0.5,
+            sep, prev_diff * 0.5 + input * 0.5,
+        ], axis=1).astype(np.uint8)
