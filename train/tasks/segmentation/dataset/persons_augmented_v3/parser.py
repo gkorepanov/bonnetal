@@ -235,7 +235,7 @@ class AugmenetedSegmentationDataset(Dataset):
         self.augmenter = augmenter
         self.is_train = is_train
         self.tensorize_image = torchvision.transforms.ToTensor()
-        self.tensorize_mask = lambda x: torch.from_numpy(np.squeeze(x)).long()
+        self.tensorize_mask = lambda x: torch.from_numpy(np.squeeze(x)).to(torch.float32)
         self.normalizer = normalizer
 
     def __len__(self):

@@ -193,8 +193,10 @@ class Trainer():
                                 cycle_momentum=True,
                                 base_momentum=self.CFG["train"]["min_momentum"],
                                 max_momentum=self.CFG["train"]["max_momentum"],
-                                post_decay=final_decay,
-                                last_epoch=self.CFG["train"].get("last_epoch", -1))
+                                post_decay=final_decay)
+
+    if self.CFG["train"].get("last_epoch"):
+        for _ in range(self.CFG["train"]["last_epoch"]): self.scheduler.step()
 
     # buffer to save the best N models
     self.best_n_models = self.CFG["train"]["avg_N"]
@@ -465,7 +467,7 @@ class Trainer():
 
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
-        # measure data loading time
+      # measure data loading time
       data_time.update(time.time() - end)
       if not self.multi_gpu and self.gpu:
         input = input.cuda()
@@ -488,14 +490,15 @@ class Trainer():
 
       # measure accuracy and record loss
       loss = loss.mean()
-      with torch.no_grad():
-        evaluator.reset()
-        evaluator.addBatch(output.argmax(dim=1), target)
-        accuracy = evaluator.getacc()
-        jaccard, class_jaccard = evaluator.getIoU()
       losses.update(loss.item(), input.size(0))
-      acc.update(accuracy.item(), input.size(0))
-      iou.update(class_jaccard[-1].item(), input.size(0))
+
+     # with torch.no_grad():
+       # evaluator.reset()
+       # evaluator.addBatch(output.argmax(dim=1), target)
+       # accuracy = evaluator.getacc()
+       # jaccard, class_jaccard = evaluator.getIoU()
+     # acc.update(accuracy.item(), input.size(0))
+     # iou.update(class_jaccard[-1].item(), input.size(0))
 
       # measure elapsed time
       batch_time.update(time.time() - end)
