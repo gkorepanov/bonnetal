@@ -496,7 +496,7 @@ class Trainer():
 
     end = time.time()
     for i, batch in enumerate(train_loader):
-      input, * = batch
+      input, *rest = batch
       # measure data loading time
       data_time.update(time.time() - end)
 

@@ -10,8 +10,8 @@ from torch.utils.data import Dataset, ConcatDataset
 import matplotlib.pyplot as plt
 from PIL import Image
 
-from .coco import COCOPersonDataset
-from .augmenters import SegmentationAugmenter
+from tasks.segmentation.dataset.persons_augmented_v3.coco import COCOPersonDataset
+from tasks.segmentation.dataset.persons_augmented_v3.augmenters import SegmentationAugmenter
 
 
 def is_image(filename):

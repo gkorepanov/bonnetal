@@ -35,7 +35,7 @@ class Segmentator(nn.Module):
     if torch.cuda.is_available():
       self.backbone.cuda()
       stub = stub.cuda()
-    _, skips = self.backbone(stub)
+    _, skips = self.backbone(stub, None)
 
     decoderModule = imp.load_source("decoderModule",
                                     TRAIN_PATH + '/tasks/segmentation/decoders/' +

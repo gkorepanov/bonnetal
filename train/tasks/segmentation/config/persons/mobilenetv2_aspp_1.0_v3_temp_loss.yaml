@@ -5,12 +5,12 @@ train:
   max_lr: 0.01           # sgd learning rate max
   min_lr: 0.001          # warmup initial learning rate
   up_epochs: 0.3         # warmup during first XX epochs (can be float)
-  down_epochs:  50      # warmdown during second XX epochs  (can be float)
+  down_epochs:  50       # warmdown during second XX epochs  (can be float)
   max_momentum: 0.9      # sgd momentum max when lr is mim
   min_momentum: 0.85     # sgd momentum min when lr is max
   final_decay: 0.995     # learning rate decay per epoch after initial cycle (from min lr)
   w_decay: 0.0005        # weight decay
-  batch_size: 48         # batch size
+  batch_size: 64         # batch size
   report_batch: 1        # every x batches, report loss
   report_epoch: 1        # every x epochs, report validation set
   report_batch_val: 100  # every 100 batches, report validation set
@@ -57,7 +57,7 @@ dataset:
   name: "persons_augmented_v3"
   location:
    - /home/g-korepanov/datasets/coco
-  workers: 24 # number of threads to get data
+  workers: 10 # number of threads to get data
   img_means: # rgb
     - 0.46992042
     - 0.45250652
