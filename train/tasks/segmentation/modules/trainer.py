@@ -584,7 +584,7 @@ class Trainer():
         # save a random image, if desired
         if save_images and (i % self.save_image_each == 0):
           index = np.random.randint(0, batch_size - 1)
-          rand_imgs.append(self.make_log_image(batch=batch, batch_result=batch_result))
+          rand_imgs.append(self.make_log_image(batch=batch, batch_result=batch_result, index=index))
 
       accuracy = evaluator.getacc()
       jaccard, class_jaccard = evaluator.getIoU()
@@ -605,12 +605,43 @@ class Trainer():
 
     return acc.avg, iou.avg, losses.avg, rand_imgs
 
-  def make_log_image(self, batch, batch_result):
-    if self.training_mode == 'temporal_loss':
-      for key, tensor in batch.items():
-        print(key, tensor.shape)
-      for key, tensor in batch_result.items():
-        print(key, tensor.shape)
+  def make_log_image(self, batch, batch_result, index):
+      # for key, tensor in batch.items():
+      #   print(key, tensor.shape)
+      # for key, tensor in batch_result.items():
+      #   print(key, tensor.shape)
+
+      curr_image = self.parser.get_inv_normalize()(batch['curr_image'][index])
+      curr_image = curr_image.permute(1, 2, 0).cpu().numpy() * 255
+      sep = np.ones((curr_image.shape[0], 2, 3)) * 255
+
+      curr_mask = batch['curr_mask'][index].cpu().numpy()
+      curr_output = self.binarize_output_mask(batch_result['curr_output'][index]).squeeze().cpu().numpy()
+
+      result = [
+        curr_image,
+        self.colorizer.do(curr_mask) * 0.5 + curr_image * 0.5,
+        self.colorizer.do(curr_output) * 0.5 + curr_image * 0.5
+      ]
+
+
+      if self.training_mode == 'temporal_loss':
+          prev_image = self.parser.get_inv_normalize()(batch['prev_image'][index])
+          prev_image = prev_image.permute(1, 2, 0).cpu().numpy() * 255
+
+          prev_output = self.binarize_output_mask(batch_result['prev_output'][index]).squeeze().cpu().numpy()
+          pseudo_prev_mask = self.binarize_output_mask(batch_result['pseudo_prev_mask'][index]).squeeze().cpu().numpy()
+
+          result += [
+            self.colorizer.do(prev_output) * 0.5 + prev_image * 0.5,
+            self.colorizer.do(pseudo_prev_mask - prev_output) * 0.5 + prev_image * 0.5
+          ]
+      else:
+          raise NotImplementedError()
+
+      return np.concatenate([
+          sum([[x, sep] for x in result], [])[:-1]
+      ], axis=1).astype(np.uint8)
 
     # input = self.parser.get_inv_normalize()(input) * 255
     # input = input.cpu().numpy().transpose(1, 2, 0)
