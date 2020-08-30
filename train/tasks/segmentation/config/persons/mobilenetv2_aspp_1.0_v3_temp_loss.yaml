@@ -13,15 +13,14 @@ train:
   batch_size: 64         # batch size
   report_batch: 1        # every x batches, report loss
   report_epoch: 1        # every x epochs, report validation set
-  report_batch_val: 100  # every 100 batches, report validation set
   save_summary: False    # Summary of weight histograms for tensorboard
   save_imgs: True        # False doesn't save anything, True saves some
-                         # sample images (one per batch of the last calculated batch)
-                         # in log folder
+  num_images_to_save: 30
   avg_N: 3               # average the N best models
   crop_prop:
     height: 288
     width: 512
+  training_mode: "temporal_loss"
 
 # backbone parameters
 backbone:
@@ -80,5 +79,6 @@ dataset:
     0: [0,0,0]
     1: [0,255,0]
     -1: [255,0,0]
-  is_gen_prev_mask: False
-  is_gen_prev_img: True
+  curr2prev_optical_flow_generator: "imgaug_affine_elastic"
+  prev_image_generator: "optical_flow_and_local"
+  prev_mask_generator: False

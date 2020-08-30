@@ -168,12 +168,14 @@ class Backbone(nn.Module):
       else:
         print("Can't get bonnetal weights for backbone due to different input depth")
 
-  def forward(self, x, prev_mask):
+  def forward(self, image, mask):
     if self.use_prev_mask:
       x = torch.cat([
-          x,
-          prev_mask.unsqueeze(0)
+          image,
+          mask.unsqueeze(0)
       ], dim=1)
+    else:
+      x = image
     input_size = x.shape[2]
     skip_features = [(1, x)]
 

@@ -66,13 +66,12 @@ class Trainer():
                                       location=self.CFG["dataset"]["location"],
                                       batch_size=self.CFG["train"]["batch_size"],
                                       workers=self.CFG["dataset"]["workers"],
-                                      is_gen_prev_mask=self.CFG["dataset"]["is_gen_prev_mask"],
-                                      is_gen_prev_img=self.CFG["dataset"]["is_gen_prev_img"])
-    self.is_gen_prev_mask = self.CFG["dataset"]["is_gen_prev_mask"]
-    self.is_gen_prev_img = self.CFG["dataset"]["is_gen_prev_img"]
-
+                                      prev_mask_generator=self.CFG["dataset"].get("prev_mask_generator),
+                                      prev_image_generator=self.CFG["dataset"].get("prev_image_generator"),
+                                      curr2prev_optical_flow_generator=self.CFG["dataset"].get("curr2prev_optical_flow_generator"))
+    self.training_mode = self.CFG["train"]["training_mode"]
     print(f"TRAIN size: {len(self.parser.get_train_set())}; VALID size: {len(self.parser.get_valid_set())}")
-    self.save_image_each = len(self.parser.get_valid_set()) // 30
+    self.save_image_each = len(self.parser.get_valid_set()) // self.CFG['train']['num_images_to_save']
     assert self.save_image_each > 0
     print(f"Will save an image each {self.save_image_each} batch")
 
@@ -169,12 +168,12 @@ class Trainer():
       raise Exception('Loss not defined in config file')
 
     self.criterion = criterion.to(self.device)
-    self.criterion_prev_img = nn.MSELoss().to(self.device)
+    self.temporal_criterion = nn.MSELoss().to(self.device)
 
     # loss as dataparallel too (more images in batch)
     if self.n_gpus > 1:
       self.criterion = nn.DataParallel(self.criterion).cuda()
-      self.criterion_prev_img = nn.DataParallel(self.criterion_prev_img).cuda()
+      self.temporal_criterion = nn.DataParallel(self.temporal_criterion).cuda()
 
     # optimizer
     train_dicts = [{'params': self.model_single.head.parameters()}]
@@ -266,7 +265,6 @@ class Trainer():
       print("Only evaluation, no training is being used")
       acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
                                                model=self.model,
-                                               criterion=self.criterion,
                                                evaluator=self.evaluator,
                                                save_images=self.CFG["train"]["save_imgs"],
                                                class_dict=self.CFG["dataset"]["labels"])
@@ -310,7 +308,6 @@ class Trainer():
       # train for 1 epoch
       acc, iou, loss, update_mean = self.train_epoch(train_loader=self.parser.get_train_set(),
                                                      model=self.model,
-                                                     criterion=self.criterion,
                                                      optimizer=self.optimizer,
                                                      epoch=epoch,
                                                      evaluator=self.evaluator,
@@ -328,7 +325,6 @@ class Trainer():
         print("*" * 80)
         acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
                                                  model=self.model,
-                                                 criterion=self.criterion,
                                                  evaluator=self.evaluator,
                                                  save_images=self.CFG["train"]["save_imgs"],
                                                  class_dict=self.CFG["dataset"]["labels"])
@@ -407,7 +403,6 @@ class Trainer():
           # evaluate on validation set
           acc, iou, loss, _ = self.validate(val_loader=self.parser.get_valid_set(),
                                             model=self.model,
-                                            criterion=self.criterion,
                                             evaluator=self.evaluator,
                                             save_images=self.CFG["train"]["save_imgs"],
                                             class_dict=self.CFG["dataset"]["labels"])
@@ -442,34 +437,31 @@ class Trainer():
 
     return
 
-  def run_single_batch(self, model, batch, criterion, criterion_prev_img):
-      input, target, prev_mask, prev_image_augmenter, prev_image = batch
+  def run_single_batch(self, model, batch):
       if self.gpu:
-          input = input.cuda()
-          if self.is_gen_prev_mask:
-              prev_mask = prev_mask.cuda()
-          if self.is_gen_prev_img:
-              prev_image = prev_image.cuda(non_blocking=True)
-          target = target.cuda(non_blocking=True).long()
+        for key in batch:
+          batch[key] = batch[key].cuda()
 
-      # compute output
-      output = model(input, prev_mask)
-      categorical_output = torch.cat([1 - output, output], dim=1)
-      loss = criterion(categorical_output, target)
+      if self.training_mode == 'temporal_loss':
+        curr_output = model(image=batch['curr_image'], mask=None)
+        gt_loss = self.criterion(torch.cat([1 - curr_output, curr_output], dim=1), batch['curr_mask'])
 
-      if self.is_gen_prev_img:
-          output_numpy = output.detach().squeeze().numpy()
-          pseudo_target = torch.from_numpy(prev_image_augmenter(image=output_numpy)).to(torch.float32).squeeze()
-          if self.gpu:
-            pseudo_target = pseudo_target.cuda()
-          prev_output = model(prev_image, None)
-          loss += criterion_prev_img(prev_output.squeeze(), pseudo_target)
+        prev_output = model(image=batch['prev_image'], mask=None)
+        pseudo_prev_mask = F.grid_sample(curr_output, batch['curr2prev_optical_flow'])
+        temporal_loss = self.temporal_criterion(prev_output, pseudo_prev_mask)
+        loss = gt_loss + 0.3 * temporal_loss
+
+        batch_result = {
+          'curr_output': curr_output,
+          'prev_output': prev_output,
+          'pseudo_prev_mask': pseudo_prev_mask
+        }
       else:
-          pseudo_target = prev_output = None
+        raise NotImplementedError()
 
-      return loss, output, categorical_output, target, prev_output, pseudo_target
+      return loss, batch_result
 
-  def train_epoch(self, train_loader, model, criterion, optimizer, epoch, evaluator, block_bn, scheduler):
+  def train_epoch(self, train_loader, model, optimizer, epoch, evaluator, block_bn, scheduler):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -494,43 +486,38 @@ class Trainer():
         if isinstance(m, nn.modules.BatchNorm3d):
           m.eval()
 
+    loss_idx = torch.ones(self.n_gpus).cuda() if self.n_gpus > 1 else None
+
     end = time.time()
     for i, batch in enumerate(train_loader):
-      input, *rest = batch
+      batch_size = batch['curr_image'].size(0)
       # measure data loading time
       data_time.update(time.time() - end)
 
-      loss, _ = self.run_single_batch(
-        model=model, batch=batch, criterion=criterion, criterion_prev_img=self.criterion_prev_img
-      )
+      loss, batch_result = self.run_single_batch(model=model, batch=batch)
 
       # compute gradient and do SGD step
       optimizer.zero_grad()
-      if self.n_gpus > 1:
-        idx = torch.ones(self.n_gpus).cuda()
-        loss.backward(idx)
-      else:
-        loss.backward()
+      loss.backward(loss_idx)
       optimizer.step()
 
       # measure accuracy and record loss
       loss = loss.mean()
-      losses.update(loss.item(), input.size(0))
+      losses.update(loss.item(), batch_size)
 
-     # with torch.no_grad():
-       # evaluator.reset()
-       # evaluator.addBatch(output.argmax(dim=1), target)
-       # accuracy = evaluator.getacc()
-       # jaccard, class_jaccard = evaluator.getIoU()
-     # acc.update(accuracy.item(), input.size(0))
-     # iou.update(class_jaccard[-1].item(), input.size(0))
+      # with torch.no_grad():
+        # evaluator.reset()
+        # evaluator.addBatch(output.argmax(dim=1), target)
+        # accuracy = evaluator.getacc()
+        # jaccard, class_jaccard = evaluator.getIoU()
+      # acc.update(accuracy.item(), batch_size)
+      # iou.update(class_jaccard[-1].item(), batch_size)
 
       # measure elapsed time
       batch_time.update(time.time() - end)
       end = time.time()
 
-      # get gradient updates and weights, so I can print the relationship of
-      # their norms
+      # get gradient updates and weights, so to print the relationship of their norms
       lr = self.optimizer.param_groups[0]["lr"]
       update_ratios = []
       for _, value in self.model.named_parameters():
@@ -556,15 +543,15 @@ class Trainer():
                   data_time=data_time, loss=losses, acc=acc, iou=iou, lr=lr,
                   umean=update_mean, ustd=update_std))
 
-      if i % self.CFG['train']['report_batch_val'] == 0:
-          print('Placeholder for validation during epoch')
-
       # step scheduler
       scheduler.step()
 
     return acc.avg, iou.avg, losses.avg, update_ratio_meter.avg
 
-  def validate(self, val_loader, model, criterion, evaluator, save_images, class_dict):
+  def binarize_output_mask(self, output_mask):
+    return (output_mask > 0.5).long()
+
+  def validate(self, val_loader, model, evaluator, save_images, class_dict):
     batch_time = AverageMeter()
     losses = AverageMeter()
     acc = AverageMeter()
@@ -582,15 +569,13 @@ class Trainer():
     with torch.no_grad():
       end = time.time()
       for i, batch in enumerate(val_loader):
-        input, _, prev_mask, _, prev_image = batch
-        loss, output, categorical_output, target, prev_output, pseudo_target = self.run_single_batch(
-          model=model, batch=batch, criterion=criterion, criterion_prev_img=self.criterion_prev_img
-        )
+        batch_size = batch['curr_image'].size(0)
+        loss, batch_result = self.run_single_batch(model=model, batch=batch)
 
         # measure accuracy and record loss
-        evaluator.addBatch(categorical_output.argmax(dim=1), target)
+        evaluator.addBatch(self.binarize_output_mask(batch_result['curr_output']), batch['curr_mask'])
         loss = loss.mean()
-        losses.update(loss.item(), input.size(0))
+        losses.update(loss.item(), batch_size)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -599,9 +584,7 @@ class Trainer():
         # save a random image, if desired
         if save_images and (i % self.save_image_each == 0):
           index = np.random.randint(0, input.shape[0] - 1)
-          rand_imgs.append(self.make_log_image(
-            input[index], output[index], prev_mask[index], prev_image[index], target[index], pseudo_target[index], prev_output[index]
-          ))
+          rand_imgs.append(self.make_log_image(batch=batch, batch_result=batch_result))
 
       accuracy = evaluator.getacc()
       jaccard, class_jaccard = evaluator.getIoU()
@@ -622,53 +605,51 @@ class Trainer():
 
     return acc.avg, iou.avg, losses.avg, rand_imgs
 
-  def make_log_image(self,
-      input,
-      output,
-      prev_mask,
-      prev_image,
-      target,
-      pseudo_target,
-      prev_output
-  ):
-    input = self.parser.get_inv_normalize()(input) * 255
-    input = input.cpu().numpy().transpose(1, 2, 0)
-    sep = np.ones((input.shape[0], 2, 3)) * 255
-    pred = (output.cpu().numpy() > 0.5).astype(int)
-    target = target.cpu().numpy()
+  def make_log_image(self, batch, batch_result):
+    if self.training_mode == 'temporal_loss':
+      for key, tensor in batch.items():
+        print(key, tensor.shape)
+      for key, tensor in batch_result.items():
+        print(key, tensor.shape)
 
-    if prev_mask is not None:
-        raise NotImplementedError()
-        prev_mask = prev_mask.cpu().numpy().astype(np.uint8)
+    # input = self.parser.get_inv_normalize()(input) * 255
+    # input = input.cpu().numpy().transpose(1, 2, 0)
+    # sep = np.ones((input.shape[0], 2, 3)) * 255
+    # pred = (output.cpu().numpy() > 0.5).astype(int)
+    # target = target.cpu().numpy()
 
-        target_diff = self.colorizer.do(target - prev_mask)
-        pred_diff = self.colorizer.do(pred - prev_mask)
-        prev_mask = self.colorizer.do(prev_mask)
-        target = self.colorizer.do(target)
-        pred = self.colorizer.do(pred)
+    # if prev_mask is not None:
+    #     raise NotImplementedError()
+    #     prev_mask = prev_mask.cpu().numpy().astype(np.uint8)
 
-        return np.concatenate([
-            input,
-            prev_mask * 0.5 + input * 0.5,
-            sep, target * 0.5 + input * 0.5,
-            sep, target_diff * 0.5 + input * 0.5,
-            sep, pred * 0.5 + input * 0.5,
-            sep, pred_diff * 0.5 + input * 0.5
-        ], axis=1).astype(np.uint8)
+    #     target_diff = self.colorizer.do(target - prev_mask)
+    #     pred_diff = self.colorizer.do(pred - prev_mask)
+    #     prev_mask = self.colorizer.do(prev_mask)
+    #     target = self.colorizer.do(target)
+    #     pred = self.colorizer.do(pred)
 
-    if prev_image is not None:
-        prev_output = (prev_output.cpu().numpy() > 0.5).astype(int)
-        pseudo_target = (pseudo_target.cpu().numpy() > 0.5).astype(int)
+    #     return np.concatenate([
+    #         input,
+    #         prev_mask * 0.5 + input * 0.5,
+    #         sep, target * 0.5 + input * 0.5,
+    #         sep, target_diff * 0.5 + input * 0.5,
+    #         sep, pred * 0.5 + input * 0.5,
+    #         sep, pred_diff * 0.5 + input * 0.5
+    #     ], axis=1).astype(np.uint8)
 
-        prev_diff = self.colorizer.do(pseudo_target - prev_output)
-        prev_output = self.colorizer.do(prev_output)
-        pseudo_target = self.colorizer.do(pseudo_target)
+    # if prev_image is not None:
+    #     prev_output = (prev_output.cpu().numpy() > 0.5).astype(int)
+    #     pseudo_target = (pseudo_target.cpu().numpy() > 0.5).astype(int)
 
-        return np.concatenate([
-            input,
-            sep, target * 0.5 + input * 0.5,
-            sep, pred * 0.5 + input * 0.5,
-            sep, prev_output * 0.5 + input * 0.5,
-            sep, pseudo_target * 0.5 + input * 0.5,
-            sep, prev_diff * 0.5 + input * 0.5,
-        ], axis=1).astype(np.uint8)
+    #     prev_diff = self.colorizer.do(pseudo_target - prev_output)
+    #     prev_output = self.colorizer.do(prev_output)
+    #     pseudo_target = self.colorizer.do(pseudo_target)
+
+    #     return np.concatenate([
+    #         input,
+    #         sep, target * 0.5 + input * 0.5,
+    #         sep, pred * 0.5 + input * 0.5,
+    #         sep, prev_output * 0.5 + input * 0.5,
+    #         sep, pseudo_target * 0.5 + input * 0.5,
+    #         sep, prev_diff * 0.5 + input * 0.5,
+    #     ], axis=1).astype(np.uint8)

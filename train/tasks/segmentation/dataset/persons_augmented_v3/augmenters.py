@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 
-def make_image_augmenter(scale, crop_size):
+def make_baseline_augmenter(scale, crop_size):
     """Default augmenter, adds crop and resize"""
 
     h, w = crop_size
@@ -26,7 +26,7 @@ def make_image_augmenter(scale, crop_size):
     ], random_order=False)
 
 
-def choose_random_objects(segmaps, random_state, parents, hooks):
+def choose_random_objects_mask_augmenter(segmaps, random_state, parents, hooks):
     """Augmenter which randomly adds some extra objects to segmentation mask"""
 
     result = []
@@ -42,7 +42,7 @@ def choose_random_objects(segmaps, random_state, parents, hooks):
     return result
 
 
-def total_dropout(segmaps, random_state, parents, hooks):
+def total_dropout_mask_augmenter(segmaps, random_state, parents, hooks):
     """Augmenter which randomly either removes mask at all or fills entire image with mask"""
 
     result = []
@@ -56,7 +56,7 @@ def total_dropout(segmaps, random_state, parents, hooks):
     return result
 
 
-def morph_close(segmaps, random_state, parents, hooks):
+def morph_close_mask_augmenter(segmaps, random_state, parents, hooks):
     """Morphological close augmenter"""
 
     result = []
@@ -67,7 +67,7 @@ def morph_close(segmaps, random_state, parents, hooks):
     return result
 
 
-def make_morph_operation(operation, min_coef=0, max_coef=0.2):
+def make_morph_operation_mask_augmenter(operation, min_coef=0, max_coef=0.2):
     """Generates morhological operation augmenter of segmentation masks
 
     Args:
@@ -102,20 +102,20 @@ def make_morph_operation(operation, min_coef=0, max_coef=0.2):
     return f
 
 
-def make_prev_mask_augmenter(crop_size):
+def make_synthetic_prev_mask_complex_mask_augmenter(crop_size):
     h, w = crop_size
 
     return iaa.Sequential([
-        iaa.Sometimes(0.5, iaa.Lambda(func_segmentation_maps=choose_random_objects)),
-        iaa.Lambda(func_segmentation_maps=morph_close),
+        iaa.Sometimes(0.5, iaa.Lambda(func_segmentation_maps=choose_random_objects_mask_augmenter)),
+        iaa.Lambda(func_segmentation_maps=morph_close_mask_augmenter),
         iaa.Sometimes(0.3,
             # failed mask
             iaa.OneOf([
                 iaa.TotalDropout(1.0),  # fill image
                 iaa.Sequential([  # fail mask
                     iaa.OneOf([
-                        iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.erode, min_coef=0.2, max_coef=0.5)),
-                        iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.dilate, min_coef=0.2, max_coef=0.5)),
+                        iaa.Lambda(func_segmentation_maps=make_morph_operation_mask_augmenter(cv2.erode, min_coef=0.2, max_coef=0.5)),
+                        iaa.Lambda(func_segmentation_maps=make_morph_operation_mask_augmenter(cv2.dilate, min_coef=0.2, max_coef=0.5)),
                     ]),
                     iaa.Affine(translate_percent=iap.Choice([iap.Uniform(-0.5, -0.2), iap.Uniform(0.2, 0.5)]))
                 ])
@@ -124,8 +124,8 @@ def make_prev_mask_augmenter(crop_size):
             # normal mask
             iaa.Sequential([
                 iaa.Sometimes(0.1, iaa.OneOf([
-                    iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.erode)),  # smaller mask
-                    iaa.Lambda(func_segmentation_maps=make_morph_operation(cv2.dilate)),  # larger mask
+                    iaa.Lambda(func_segmentation_maps=make_morph_operation_mask_augmenter(cv2.erode)),  # smaller mask
+                    iaa.Lambda(func_segmentation_maps=make_morph_operation_mask_augmenter(cv2.dilate)),  # larger mask
                 ])),
                 iaa.Sometimes(1.0, iaa.Affine(
                     scale=iap.Normal(loc=1, scale=0.02),
@@ -144,42 +144,76 @@ def make_prev_mask_augmenter(crop_size):
     ], random_order=False)
 
 
-def make_prev_image_augmenter(crop_size):
+def make_local_non_geometric_image_augmenter(crop_size):
     h, w = crop_size
 
     return iaa.Sequential([
-        iaa.Affine(
-            scale=iap.Normal(loc=1, scale=0.05),
-            translate_percent=iap.Normal(loc=0, scale=0.05),
-            shear=iap.Normal(loc=0, scale=2),
-            backend='cv2'
-        ),
-        iaa.Sometimes(0.3, iaa.ElasticTransformation(alpha=20, sigma=10)),
         iaa.Sometimes(0.3, iaa.MotionBlur(k=(3, 7))),
         iaa.Sometimes(0.3, iaa.OneOf([
             iaa.Sequential([
                 iaa.AdditiveGaussianNoise(loc=0, scale=(0.0, 15), per_channel=True),
                 iaa.GaussianBlur(sigma=(0, 1)),
             ])
-        ])),
+        ]))
     ], random_order=False)
 
 
+def make_optical_flow_augmenter(crop_size):
+    h, w = crop_size
+    alpha_parameter = iap.Uniform(0, 60)
+
+    def augment(*args, **kwargs):
+        alpha = alpha_parameter.draw_sample()
+        sigma = alpha / 2.5
+        augmenter = iaa.Sequential([
+            iaa.Affine(
+                scale=iap.Normal(loc=1, scale=0.02),
+                translate_percent=iap.Normal(loc=0, scale=0.02),
+                shear=iap.Normal(loc=0, scale=2),
+                backend='cv2'
+            ),
+            iaa.Sometimes(0.3, iaa.ElasticTransformation(alpha=alpha, sigma=sigma))
+        ], random_order=False)
+        return augmenter(*args, **kwargs)
+    return augment
+
+
+def make_optical_flow_generator(crop_size):
+    h, w = crop_size
+    augmenter = make_optical_flow_augmenter(crop_size)
+    grid = np.stack(np.meshgrid(np.linspace(1, 3, h), np.linspace(1, 3, w)), axis=-1).astype(np.float32)
+    return lambda: augmenter(image=grid) - 2
+
+
+def apply_optical_flow(image, optical_flow):
+    optical_flow_torch = torch.tensor(optical_flow).unsqueeze(0).to(torch.float32)
+    image_torch = torch.tensor(image).permute(2, 0, 1).unsqueeze(0).to(torch.float32)
+    result_torch = torch.nn.functional.grid_sample(image_torch, optical_flow_torch, align_corners=False)
+    result = result_torch[0].permute(1, 2, 0).numpy().astype(np.uint8)
+    return result
+
+
 class SegmentationAugmenter:
-    def __init__(self, scale, crop_size, is_gen_prev_mask: bool, is_gen_prev_img: bool):
+    def __init__(
+        self,
+        scale, crop_size,
+        prev_mask_generator=None,
+        prev_image_generator=None,
+        curr2prev_optical_flow_generator=None
+    ):
         super().__init__()
         h, w = crop_size
-        self.image_augmenter = make_image_augmenter(scale=scale, crop_size=crop_size)
-        self.prev_mask_augmenter = make_prev_mask_augmenter(crop_size=crop_size)
-        self.prev_image_augmenter = make_prev_image_augmenter(crop_size=crop_size)
-        self.is_gen_prev_mask = is_gen_prev_mask
-        self.is_gen_prev_img = is_gen_prev_img
+        self.baseline_augmenter = make_baseline_augmenter(scale=scale, crop_size=crop_size)
         self.pad = iaa.size.PadToFixedSize(w, h)
+
         def mask_postprocess(x):
             x = (x == 1).astype(np.uint8)
             if x.shape[:2] == crop_size: return x
             return cv2.resize(x, tuple(reversed(crop_size)), interpolation=cv2.INTER_LINEAR)
         self.mask_postprocess = mask_postprocess
+
+        self.imgaug_affine_elastic_optical_flow_generator = make_optical_flow_generator(crop_size)
+        self.local_non_geometric_image_augmenter = make_local_non_geometric_image_augmenter(crop_size)
 
     def to_imgaug_format(self, image, label):
         image = np.array(image)
@@ -199,20 +233,33 @@ class SegmentationAugmenter:
         image, output_segmap = pad(image=image, segmentation_maps=segmap)
         output_segmap = self.mask_postprocess(output_segmap.arr)
 
-        if self.is_gen_prev_mask:
-            input_segmap = self.prev_mask_augmenter(segmentation_maps=segmap)
-            input_segmap = self.mask_postprocess(pad(segmentation_maps=input_segmap).arr)
-        else:
-            input_segmap = None
+        result = {
+            'curr_image': image,
+            'curr_mask': output_segmap
+        }
 
-        if self.is_gen_prev_img:
-            prev_image_augmenter = self.prev_image_augmenter.to_deterministic()
-            prev_image = prev_image_augmenter(image=image)
+        if not curr2prev_optical_flow_generator:
+            pass
+        elif curr2prev_optical_flow_generator == 'imgaug_affine_elastic':
+            result['curr2prev_optical_flow'] = self.imgaug_affine_elastic_optical_flow_generator()
         else:
-            prev_image_augmenter = None
-            prev_image = None
+            raise NotImplementedError()
 
-        return image, output_segmap, input_segmap, prev_image_augmenter, prev_image
+        if not prev_image_generator:
+            pass
+        elif prev_image_generator == 'optical_flow_and_local':
+            prev_image = apply_optical_flow(result['curr_image'], result['curr2prev_optical_flow'])
+            prev_image = self.local_non_geometric_image_augmenter(image=prev_image)
+            result['prev_image'] = prev_image
+        else:
+            raise NotImplementedError()
+
+        if not prev_mask_generator:
+            pass
+        else:
+            raise NotImplementedError()
+
+        return result
 
     @staticmethod
     def init_random_state(seed=None):

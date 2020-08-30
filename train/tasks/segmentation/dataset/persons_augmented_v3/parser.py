@@ -14,11 +14,6 @@ from tasks.segmentation.dataset.persons_augmented_v3.coco import COCOPersonDatas
 from tasks.segmentation.dataset.persons_augmented_v3.augmenters import SegmentationAugmenter
 
 
-def is_image(filename):
-    EXTENSIONS = ['.jpg', '.jpeg', '.png']
-    return any(filename.endswith(ext) for ext in EXTENSIONS)
-
-
 def make_normalizer(means, stds):
     return torchvision.transforms.Normalize(mean=means, std=stds)
 
@@ -36,9 +31,9 @@ class AugmentedSegmentationDataset(Dataset):
         self.dataset = dataset
         self.augmenter = augmenter
         self.is_train = is_train
-        self.tensorize_image = torchvision.transforms.ToTensor()
-        self.tensorize_mask = lambda x: torch.from_numpy(np.squeeze(x)).to(torch.float32)
+        self.tensorize = lambda x: torch.from_numpy(x).to(torch.float32)
         self.normalizer = normalizer
+        self.IMAGE_KEYS = ['prev_image', 'curr_image']
 
     def __len__(self):
         return len(self.dataset)
@@ -51,16 +46,16 @@ class AugmentedSegmentationDataset(Dataset):
         else:
             seed = index
 
-        image, target_mask, prev_mask, prev_image_augmenter, prev_image = self.augmenter.run_augmentations(image, mask, seed)
-        image = self.normalizer(self.tensorize_image(image))
-        target_mask = self.tensorize_mask(target_mask)
+        result = self.augmenter.run_augmentations(image, mask, seed)
 
-        if prev_mask is not None:
-            prev_mask = self.tensorize_mask(prev_mask)
-        if prev_image is not None:
-            prev_image = self.normalizer(self.tensorize_image(prev_image))
+        for key in result:
+            result[key] = self.tensorize(result[key])
 
-        return image, target_mask, prev_mask, prev_image_augmenter, prev_image
+        for key in self.IMAGE_KEYS:
+            if key in result:
+                result[key] = self.normalizer(key / 255)
+
+        return result
 
 
 class Parser:
@@ -74,8 +69,9 @@ class Parser:
         batch_size,
         workers,
         crop_prop,
-        is_gen_prev_mask,
-        is_gen_prev_img
+        prev_mask_generator=None,
+        prev_image_generator=None,
+        curr2prev_optical_flow_generator=None
     ):
         self.img_prop = img_prop
         self.classes = classes
@@ -86,16 +82,14 @@ class Parser:
         augmenter = SegmentationAugmenter(
             scale=(0.5, 2),
             crop_size=(crop_prop['height'], crop_prop['width']),
-            is_gen_prev_mask=is_gen_prev_mask,
-            is_gen_prev_img=is_gen_prev_img
+            prev_mask_generator=prev_mask_generator,
+            prev_image_generator=prev_image_generator,
+            curr2prev_optical_flow_generator=curr2prev_optical_flow_generator
         )
-        coco_val = COCOPersonDataset(root_dir=location[0], is_train=False)
-        coco_train = COCOPersonDataset(root_dir=location[0], is_train=True)
 
-        self.train_dataset = AugmentedSegmentationDataset(
-            coco_train, augmenter, self.norm, is_train=True)
+        coco_train = COCOPersonDataset(root_dir=location[0], is_train=True)
         self.trainloader = torch.utils.data.DataLoader(
-            self.train_dataset,
+            AugmentedSegmentationDataset(coco_train, augmenter, self.norm, is_train=True),
             batch_size=batch_size,
             shuffle=True,
             num_workers=workers,
@@ -104,10 +98,9 @@ class Parser:
         )
         assert len(self.trainloader) > 0
 
-        self.valid_dataset = AugmentedSegmentationDataset(
-            coco_val, augmenter, self.norm, is_train=False)
+        coco_val = COCOPersonDataset(root_dir=location[0], is_train=False)
         self.validloader = torch.utils.data.DataLoader(
-            self.valid_dataset,
+            AugmentedSegmentationDataset(coco_val, augmenter, self.norm, is_train=False),
             batch_size=batch_size,
             shuffle=True,
             num_workers=workers,

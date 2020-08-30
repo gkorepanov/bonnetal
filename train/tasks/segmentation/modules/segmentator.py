@@ -97,8 +97,8 @@ class Segmentator(nn.Module):
       print("No path to pretrained, using bonnetal Imagenet backbone weights and random decoder.")
 
 
-  def forward(self, x, prev_mask):
-    x, skips = self.backbone(x, prev_mask)
+  def forward(self, image, mask):
+    x, skips = self.backbone(image, mask)
     x = self.decoder(x, skips)
     x = self.head(x)
     return x
