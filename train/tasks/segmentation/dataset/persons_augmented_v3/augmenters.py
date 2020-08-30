@@ -182,7 +182,7 @@ def make_optical_flow_augmenter(crop_size):
 def make_optical_flow_generator(crop_size):
     h, w = crop_size
     augmenter = make_optical_flow_augmenter(crop_size)
-    grid = np.stack(np.meshgrid(np.linspace(1, 3, h), np.linspace(1, 3, w)), axis=-1).astype(np.float32)
+    grid = np.stack(np.meshgrid(np.linspace(1, 3, w), np.linspace(1, 3, h)), axis=-1).astype(np.float32)
     return lambda: augmenter(image=grid) - 2
 
 

@@ -10,12 +10,12 @@ train:
   min_momentum: 0.85     # sgd momentum min when lr is max
   final_decay: 0.995     # learning rate decay per epoch after initial cycle (from min lr)
   w_decay: 0.0005        # weight decay
-  batch_size: 64         # batch size
+  batch_size: 48         # batch size
   report_batch: 1        # every x batches, report loss
   report_epoch: 1        # every x epochs, report validation set
   save_summary: False    # Summary of weight histograms for tensorboard
   save_imgs: True        # False doesn't save anything, True saves some
-  num_images_to_save: 30
+  num_images_to_save: 15
   avg_N: 3               # average the N best models
   crop_prop:
     height: 288
@@ -56,7 +56,7 @@ dataset:
   name: "persons_augmented_v3"
   location:
    - /home/g-korepanov/datasets/coco
-  workers: 10 # number of threads to get data
+  workers: 20 # number of threads to get data
   img_means: # rgb
     - 0.46992042
     - 0.45250652

@@ -263,14 +263,15 @@ class Trainer():
     if self.only_eval:
       print("*" * 80)
       print("Only evaluation, no training is being used")
-      acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
+      acc, iou, losses, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
                                                model=self.model,
                                                evaluator=self.evaluator,
                                                save_images=self.CFG["train"]["save_imgs"],
                                                class_dict=self.CFG["dataset"]["labels"])
 
       # update info
-      self.info["valid_loss"] = loss
+      for key in losses:
+        self.info['valid_' + key] = losses[key]
       self.info["valid_acc"] = acc
       self.info["valid_iou"] = iou
 
@@ -323,19 +324,20 @@ class Trainer():
       if epoch % self.CFG["train"]["report_epoch"] == 0:
         # evaluate on validation set
         print("*" * 80)
-        acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
+        acc, iou, losses, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
                                                  model=self.model,
                                                  evaluator=self.evaluator,
                                                  save_images=self.CFG["train"]["save_imgs"],
                                                  class_dict=self.CFG["dataset"]["labels"])
 
         # update info
-        self.info["valid_loss"] = loss
+        for key in losses:
+            self.info['valid_' + key] = losses[key]
         self.info["valid_acc"] = acc
         self.info["valid_iou"] = iou
 
         # remember best iou and save checkpoint
-        if iou > best_val_iou and epoch > 1:
+        if iou > best_val_iou and epoch > 0:
           print("Best mean iou in validation so far, save model!")
           print("*" * 80)
           best_val_iou = iou
@@ -401,14 +403,15 @@ class Trainer():
           self.model_single.head.load_state_dict(avg_head)
 
           # evaluate on validation set
-          acc, iou, loss, _ = self.validate(val_loader=self.parser.get_valid_set(),
+          acc, iou, losses, _ = self.validate(val_loader=self.parser.get_valid_set(),
                                             model=self.model,
                                             evaluator=self.evaluator,
                                             save_images=self.CFG["train"]["save_imgs"],
                                             class_dict=self.CFG["dataset"]["labels"])
 
           # update info
-          self.info["valid_loss_avg_models"] = loss
+          for key in losses:
+            self.info['valid_' + key + '_avg_models'] = losses[key]
           self.info["valid_acc_avg_models"] = acc
           self.info["valid_iou_avg_models"] = iou
 
@@ -452,6 +455,9 @@ class Trainer():
         loss = gt_loss + 0.3 * temporal_loss
 
         batch_result = {
+          'gt_loss': gt_loss.mean().item(),
+          'temporal_loss': temporal_loss.mean().item(),
+          'loss': loss.mean().item(),
           'curr_output': curr_output,
           'prev_output': prev_output,
           'pseudo_prev_mask': pseudo_prev_mask
@@ -502,8 +508,7 @@ class Trainer():
       optimizer.step()
 
       # measure accuracy and record loss
-      loss = loss.mean()
-      losses.update(loss.item(), batch_size)
+      losses.update(batch_result['loss'], batch_size)
 
       # with torch.no_grad():
         # evaluator.reset()
@@ -553,10 +558,18 @@ class Trainer():
 
   def validate(self, val_loader, model, evaluator, save_images, class_dict):
     batch_time = AverageMeter()
-    losses = AverageMeter()
     acc = AverageMeter()
     iou = AverageMeter()
     rand_imgs = []
+
+    if self.training_mode == 'temporal_loss':
+      losses = {
+        'gt_loss': AverageMeter(),
+        'temporal_loss': AverageMeter(),
+        'loss': AverageMeter()
+      }
+    else:
+      raise NotImplementedError()
 
     # switch to evaluate mode
     model.eval()
@@ -570,12 +583,13 @@ class Trainer():
       end = time.time()
       for i, batch in enumerate(val_loader):
         batch_size = batch['curr_image'].size(0)
-        loss, batch_result = self.run_single_batch(model=model, batch=batch)
+        _, batch_result = self.run_single_batch(model=model, batch=batch)
 
         # measure accuracy and record loss
         evaluator.addBatch(self.binarize_output_mask(batch_result['curr_output']), batch['curr_mask'])
-        loss = loss.mean()
-        losses.update(loss.item(), batch_size)
+
+        for key in losses:
+          losses[key].update(batch_result[key], batch_size)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -596,14 +610,14 @@ class Trainer():
             'Loss avg {loss.avg:.4f}\n'
             'Acc avg {acc.avg:.3f}\n'
             'IoU avg {iou.avg:.3f}'.format(batch_time=batch_time,
-                                           loss=losses,
+                                           loss=losses['loss'],
                                            acc=acc, iou=iou))
       # print also classwise
       for i, jacc in enumerate(class_jaccard):
         print('IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
             i=i, class_str=class_dict[i], jacc=jacc))
 
-    return acc.avg, iou.avg, losses.avg, rand_imgs
+    return acc.avg, iou.avg, {k: v.avg for k, v in losses.items()}, rand_imgs
 
   def make_log_image(self, batch, batch_result, index):
       # for key, tensor in batch.items():
@@ -624,7 +638,6 @@ class Trainer():
         self.colorizer.do(curr_output) * 0.5 + curr_image * 0.5
       ]
 
-
       if self.training_mode == 'temporal_loss':
           prev_image = self.parser.get_inv_normalize()(batch['prev_image'][index])
           prev_image = prev_image.permute(1, 2, 0).cpu().numpy() * 255
@@ -634,10 +647,13 @@ class Trainer():
 
           result += [
             self.colorizer.do(prev_output) * 0.5 + prev_image * 0.5,
-            self.colorizer.do(pseudo_prev_mask - prev_output) * 0.5 + prev_image * 0.5
+            self.colorizer.do(prev_output - pseudo_prev_mask) * 0.5 + prev_image * 0.5
           ]
       else:
           raise NotImplementedError()
+
+      # for i, tensor in enumerate(result):
+      #     print(i, tensor.shape)
 
       return np.concatenate(sum([[x, sep] for x in result], [])[:-1], axis=1).astype(np.uint8)
 
