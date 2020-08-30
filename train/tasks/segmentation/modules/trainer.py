@@ -639,9 +639,7 @@ class Trainer():
       else:
           raise NotImplementedError()
 
-      return np.concatenate([
-          sum([[x, sep] for x in result], [])[:-1]
-      ], axis=1).astype(np.uint8)
+      return np.concatenate(sum([[x, sep] for x in result], [])[:-1], axis=1).astype(np.uint8)
 
     # input = self.parser.get_inv_normalize()(input) * 255
     # input = input.cpu().numpy().transpose(1, 2, 0)
