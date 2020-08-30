@@ -31,9 +31,11 @@ class AugmentedSegmentationDataset(Dataset):
         self.dataset = dataset
         self.augmenter = augmenter
         self.is_train = is_train
-        self.tensorize = lambda x: torch.from_numpy(x).to(torch.float32)
+        self.nhwc2nchw = lambda x: x.permute(2, 0, 1)
+        self.tensorize = lambda x: torch.from_numpy(x.squeeze()).to(torch.float32)
         self.normalizer = normalizer
         self.IMAGE_KEYS = ['prev_image', 'curr_image']
+        self.MASK_KEYS = ['prev_mask', 'curr_mask']
 
     def __len__(self):
         return len(self.dataset)
@@ -53,7 +55,14 @@ class AugmentedSegmentationDataset(Dataset):
 
         for key in self.IMAGE_KEYS:
             if key in result:
-                result[key] = self.normalizer(key / 255)
+                result[key] = self.normalizer(self.nhwc2nchw(result[key]) / 255)
+
+        for key in self.MASK_KEYS:
+            if key in result:
+                result[key] = result[key].long()
+
+#        for key in result:
+#            print(key, result[key].shape)
 
         return result
 

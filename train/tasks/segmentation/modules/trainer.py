@@ -66,7 +66,7 @@ class Trainer():
                                       location=self.CFG["dataset"]["location"],
                                       batch_size=self.CFG["train"]["batch_size"],
                                       workers=self.CFG["dataset"]["workers"],
-                                      prev_mask_generator=self.CFG["dataset"].get("prev_mask_generator),
+                                      prev_mask_generator=self.CFG["dataset"].get("prev_mask_generator"),
                                       prev_image_generator=self.CFG["dataset"].get("prev_image_generator"),
                                       curr2prev_optical_flow_generator=self.CFG["dataset"].get("curr2prev_optical_flow_generator"))
     self.training_mode = self.CFG["train"]["training_mode"]
@@ -583,13 +583,13 @@ class Trainer():
 
         # save a random image, if desired
         if save_images and (i % self.save_image_each == 0):
-          index = np.random.randint(0, input.shape[0] - 1)
+          index = np.random.randint(0, batch_size - 1)
           rand_imgs.append(self.make_log_image(batch=batch, batch_result=batch_result))
 
       accuracy = evaluator.getacc()
       jaccard, class_jaccard = evaluator.getIoU()
-      acc.update(accuracy.item(), input.size(0))
-      iou.update(jaccard.item(), input.size(0))
+      acc.update(accuracy.item(), batch_size)
+      iou.update(jaccard.item(), batch_size)
 
       print('Validation set:\n'
             'Time avg per batch {batch_time.avg:.3f}\n'

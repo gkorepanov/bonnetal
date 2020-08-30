@@ -5,6 +5,7 @@ from imgaug.augmentables.segmaps import SegmentationMapsOnImage
 
 import cv2
 import numpy as np
+import torch
 
 
 def make_baseline_augmenter(scale, crop_size):
@@ -214,6 +215,9 @@ class SegmentationAugmenter:
 
         self.imgaug_affine_elastic_optical_flow_generator = make_optical_flow_generator(crop_size)
         self.local_non_geometric_image_augmenter = make_local_non_geometric_image_augmenter(crop_size)
+        self.curr2prev_optical_flow_generator = curr2prev_optical_flow_generator
+        self.prev_image_generator = prev_image_generator
+        self.prev_mask_generator = prev_mask_generator
 
     def to_imgaug_format(self, image, label):
         image = np.array(image)
@@ -229,7 +233,7 @@ class SegmentationAugmenter:
         self.init_random_state(seed)
         pad = self.pad.to_deterministic()
 
-        image, segmap = self.image_augmenter(image=image, segmentation_maps=segmap)
+        image, segmap = self.baseline_augmenter(image=image, segmentation_maps=segmap)
         image, output_segmap = pad(image=image, segmentation_maps=segmap)
         output_segmap = self.mask_postprocess(output_segmap.arr)
 
@@ -238,23 +242,23 @@ class SegmentationAugmenter:
             'curr_mask': output_segmap
         }
 
-        if not curr2prev_optical_flow_generator:
+        if not self.curr2prev_optical_flow_generator:
             pass
-        elif curr2prev_optical_flow_generator == 'imgaug_affine_elastic':
+        elif self.curr2prev_optical_flow_generator == 'imgaug_affine_elastic':
             result['curr2prev_optical_flow'] = self.imgaug_affine_elastic_optical_flow_generator()
         else:
             raise NotImplementedError()
 
-        if not prev_image_generator:
+        if not self.prev_image_generator:
             pass
-        elif prev_image_generator == 'optical_flow_and_local':
+        elif self.prev_image_generator == 'optical_flow_and_local':
             prev_image = apply_optical_flow(result['curr_image'], result['curr2prev_optical_flow'])
             prev_image = self.local_non_geometric_image_augmenter(image=prev_image)
             result['prev_image'] = prev_image
         else:
             raise NotImplementedError()
 
-        if not prev_mask_generator:
+        if not self.prev_mask_generator:
             pass
         else:
             raise NotImplementedError()
