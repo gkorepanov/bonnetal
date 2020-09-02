@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 from tasks.segmentation.dataset.persons_augmented_v3.coco import COCOPersonDataset
+from tasks.segmentation.dataset.persons_augmented_v3.folder import FolderSegmentationDataset
 from tasks.segmentation.dataset.persons_augmented_v3.augmenters import SegmentationAugmenter
 
 
@@ -67,77 +68,64 @@ class AugmentedSegmentationDataset(Dataset):
         return result
 
 
+DATASETS = {
+    'coco': COCOPersonDataset,
+    'folder': FolderSegmentationDataset
+}
+
+
 class Parser:
     def __init__(
         self,
-        img_prop,
         img_means, img_stds,
-        classes,
-        train,
-        location,
-        batch_size,
-        workers,
+        train_datasets, valid_datasets, test_datasets,
+        batch_size, num_workers,
         crop_prop,
         prev_mask_generator=None,
         prev_image_generator=None,
-        curr2prev_optical_flow_generator=None
+        curr2prev_optical_flow_generator=None,
+        **kwargs
     ):
-        self.img_prop = img_prop
-        self.classes = classes
         self.norm = make_normalizer(img_means, img_stds)
         self.inv_norm = make_inv_normalizer(img_means, img_stds)
 
-        assert len(location) == 1
-        augmenter = SegmentationAugmenter(
-            scale=(0.5, 2),
-            crop_size=(crop_prop['height'], crop_prop['width']),
-            prev_mask_generator=prev_mask_generator,
-            prev_image_generator=prev_image_generator,
-            curr2prev_optical_flow_generator=curr2prev_optical_flow_generator
-        )
+        self.crop_prop = crop_prop
+        self.prev_image_generator = prev_image_generator
+        self.prev_mask_generator = prev_mask_generator
+        self.curr2prev_optical_flow_generator = curr2prev_optical_flow_generator
 
-        coco_train = COCOPersonDataset(root_dir=location[0], is_train=True)
-        self.trainloader = torch.utils.data.DataLoader(
-            AugmentedSegmentationDataset(coco_train, augmenter, self.norm, is_train=True),
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+
+        self.trainloader = self.make_dataloader(train_datasets, is_train=True)
+        self.validloader = self.make_dataloader(train_datasets, is_train=False)
+        self.testloader = self.make_dataloader(train_datasets, is_train=False)
+
+    def make_dataloader(self, params, is_train):
+        datasets = []
+        for param in params:
+            scale = tuple(param['scale']) if 'scale' in param else None
+            augmenter = SegmentationAugmenter(
+                scale=scale,
+                crop_size=(self.crop_prop['height'], self.crop_prop['width']),
+                baseline_augmenter=param['baseline_augmenter'],
+                prev_mask_generator=self.prev_mask_generator,
+                prev_image_generator=self.prev_image_generator,
+                curr2prev_optical_flow_generator=self.curr2prev_optical_flow_generator
+            )
+            extra_params = dataset['extra'] if 'extra' in dataset else dict()
+            dataset = DATASETS[dataset['name']](root_dir=dataset['location'], **extra_params)
+            augmented_dataset = AugmentedSegmentationDataset(dataset, augmenter, self.norm, is_train=False)
+            datasets.append(augmented_dataset)
+
+        dataset = ConcatDataset(datasets)
+        return torch.utils.data.DataLoader(dataset,
             batch_size=batch_size,
             shuffle=True,
             num_workers=workers,
             pin_memory=True,
             drop_last=True
         )
-        assert len(self.trainloader) > 0
-
-        coco_val = COCOPersonDataset(root_dir=location[0], is_train=False)
-        self.validloader = torch.utils.data.DataLoader(
-            AugmentedSegmentationDataset(coco_val, augmenter, self.norm, is_train=False),
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=workers,
-            pin_memory=True,
-            drop_last=True
-        )
-        assert len(self.validloader) > 0
-
-    def get_train_set(self):
-      return self.trainloader
-
-    def get_valid_set(self):
-      return self.validloader
-
-    def get_train_size(self):
-      return len(self.trainloader)
-
-    def get_valid_size(self):
-      return len(self.validloader)
-
-    def get_img_size(self):
-      h = self.img_prop["height"]
-      w = self.img_prop["width"]
-      d = self.img_prop["depth"]
-      return h, w, d
-
-    def get_n_classes(self):
-      return len(self.classes)
 
     def get_inv_normalize(self):
       return self.inv_norm

@@ -34,7 +34,6 @@ class Trainer():
     self.CFG = config
     self.log = logdir
     self.path = path
-    self.only_eval = only_eval
     self.block_bn = block_bn
 
     # put logger where it belongs
@@ -57,28 +56,25 @@ class Trainer():
     parserModule = imp.load_source("parserModule",
                                    booger.TRAIN_PATH + '/tasks/segmentation/dataset/' +
                                    self.CFG["dataset"]["name"] + '/parser.py')
-    self.parser = parserModule.Parser(img_prop=self.CFG["dataset"]["img_prop"],
-                                      img_means=self.CFG["dataset"]["img_means"],
-                                      img_stds=self.CFG["dataset"]["img_stds"],
-                                      classes=self.CFG["dataset"]["labels"],
-                                      train=True,
-                                      crop_prop=self.CFG["train"]["crop_prop"],
-                                      location=self.CFG["dataset"]["location"],
-                                      batch_size=self.CFG["train"]["batch_size"],
-                                      workers=self.CFG["dataset"]["workers"],
-                                      prev_mask_generator=self.CFG["dataset"].get("prev_mask_generator"),
-                                      prev_image_generator=self.CFG["dataset"].get("prev_image_generator"),
-                                      curr2prev_optical_flow_generator=self.CFG["dataset"].get("curr2prev_optical_flow_generator"))
+    self.parser = parserModule.Parser(batch_size=self.CFG["train"]["batch_size"], **self.CFG["dataset"])
     self.training_mode = self.CFG["train"]["training_mode"]
-    print(f"TRAIN size: {len(self.parser.get_train_set())}; VALID size: {len(self.parser.get_valid_set())}")
-    self.save_image_each = len(self.parser.get_valid_set()) // self.CFG['train']['num_images_to_save']
-    assert self.save_image_each > 0
-    print(f"Will save an image each {self.save_image_each} batch")
 
-    self.data_h, self.data_w, self.data_d = self.parser.get_img_size()
+    print(f"TRAIN size: {len(self.parser.trainloader)}")
+    print(f"VALID size: {len(self.parser.validloader)}")
+    print(f"TEST size: {len(self.parser.testloader)}")
+
+    self.valid_save_image_each = max(1, len(self.parser.validloader) // self.CFG['train']['num_images_to_save'])
+    assert self.valid_save_image_each > 0
+    print(f"Will save an image each {self.valid_save_image_each} batch during validation")
+
+    self.test_save_image_each = max(1, len(self.parser.testloader) // self.CFG['train']['num_images_to_save'])
+    assert self.test_save_image_each > 0
+    print(f"Will save an image each {self.test_save_image_each} batch during test")
+
+    self.data_h, self.data_w, self.data_d = self.CFG["train"]["input_size"]
 
     # weights for loss (and bias)
-    self.loss_w = torch.zeros(self.parser.get_n_classes(), dtype=torch.float)
+    self.loss_w = torch.zeros(len(self.CFG["dataset"]["labels"]), dtype=torch.float)
     for idx, w in self.CFG["dataset"]["labels_w"].items():
       self.loss_w[idx] = torch.tensor(w)
 
@@ -220,7 +216,7 @@ class Trainer():
     torch.save(decoder, self.log + "/segmentation_decoder" + suffix)
     torch.save(head, self.log + "/segmentation_head" + suffix)
 
-  def save_to_log(self, logdir, logger, info, epoch, w_summary=False, rand_imgs=[], img_summary=False):
+  def save_to_log(self, logdir, logger, info, epoch, w_summary=False, rand_imgs=dict(), img_summary=False):
     # save scalars
     for tag, value in info.items():
       logger.scalar_summary(tag, value, epoch)
@@ -235,17 +231,11 @@ class Trainer():
               tag + '/grad', value.grad.data.cpu().numpy(), epoch)
 
     if img_summary:
-      logger.image_summary(tag, rand_imgs, epoch)
-      directory = os.path.join(logdir, "predictions")
-      if not os.path.isdir(directory):
-        os.makedirs(directory)
-      for i, img in enumerate(rand_imgs):
-        name = os.path.join(directory, str(i) + ".png")
-        cv2.imwrite(name, img)
+      for tag, imgs in rand_imgs.items():
+        logger.image_summary(tag, imgs, epoch)
 
   def train(self):
     # accuracy and IoU stuff
-    best_train_iou = 0.0
     best_val_iou = 0.0
 
     self.ignore_class = []
@@ -253,38 +243,12 @@ class Trainer():
       if w < 1e-10:
         self.ignore_class.append(i)
         print("Ignoring class ", i, " in IoU evaluation")
+
     self.evaluator = iouEval(self.parser.get_n_classes(),
                              self.device, self.ignore_class)
 
     # image colorizer
     self.colorizer = Colorizer(self.CFG["dataset"]["color_map"])
-
-    # check if I only want to evaluate
-    if self.only_eval:
-      print("*" * 80)
-      print("Only evaluation, no training is being used")
-      acc, iou, losses, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
-                                               model=self.model,
-                                               evaluator=self.evaluator,
-                                               save_images=self.CFG["train"]["save_imgs"],
-                                               class_dict=self.CFG["dataset"]["labels"])
-
-      # update info
-      for key in losses:
-        self.info['valid_' + key] = losses[key]
-      self.info["valid_acc"] = acc
-      self.info["valid_iou"] = iou
-
-      # save to log
-      self.save_to_log(logdir=self.log,
-                       logger=self.tb_logger,
-                       info=self.info,
-                       epoch=1,
-                       w_summary=self.CFG["train"]["save_summary"],
-                       rand_imgs=rand_img,
-                       img_summary=self.CFG["train"]["save_imgs"])
-      print("*" * 80)
-      return
 
     # train for n epochs
     for epoch in range(self.CFG["train"]["max_epochs"]):
@@ -306,8 +270,11 @@ class Trainer():
       else:
         print("Invalid learning rate groups optimizer")
 
+      if epoch % self.CFG["train"]["report_epoch"] == 0:
+        self.report_validation()
+
       # train for 1 epoch
-      acc, iou, loss, update_mean = self.train_epoch(train_loader=self.parser.get_train_set(),
+      acc, iou, loss, update_mean = self.train_epoch(train_loader=self.parser.trainloader,
                                                      model=self.model,
                                                      optimizer=self.optimizer,
                                                      epoch=epoch,
@@ -321,124 +288,162 @@ class Trainer():
       self.info["train_acc"] = acc
       # self.info["train_iou"] = iou
 
-      if epoch % self.CFG["train"]["report_epoch"] == 0:
-        # evaluate on validation set
-        print("*" * 80)
-        acc, iou, losses, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
-                                                 model=self.model,
-                                                 evaluator=self.evaluator,
-                                                 save_images=self.CFG["train"]["save_imgs"],
-                                                 class_dict=self.CFG["dataset"]["labels"])
-
-        # update info
-        for key in losses:
-            self.info['valid_' + key] = losses[key]
-        self.info["valid_acc"] = acc
-        self.info["valid_iou"] = iou
-
-        # remember best iou and save checkpoint
-        if iou > best_val_iou and epoch > 0:
-          print("Best mean iou in validation so far, save model!")
-          print("*" * 80)
-          best_val_iou = iou
-
-          # now average the models and evaluate again
-          print("Averaging the best {0} models".format(self.best_n_models))
-
-          # append current backbone to its circular buffer
-          current_backbone = self.model_single.backbone.state_dict()
-          avg_backbone = copy.deepcopy(
-              self.model_single.backbone).cpu().state_dict()
-          self.best_backbones.append(copy.deepcopy(
-              self.model_single.backbone).cpu().state_dict())
-
-          # now average the backbone
-          for i, backbone in enumerate(self.best_backbones):
-              # for each weight key
-            for key, val in backbone.items():
-              # if it is the first time, zero the entry first
-              if i == 0:
-                avg_backbone[key].data.zero_()
-              # then sum the avg contribution
-              avg_backbone[key] += (backbone[key] / \
-                  float(len(self.best_backbones))).to(avg_backbone[key].dtype)
-
-          # append current backbone to its circular buffer
-          current_decoder = self.model_single.decoder.state_dict()
-          avg_decoder = copy.deepcopy(
-              self.model_single.decoder).cpu().state_dict()
-          self.best_decoders.append(copy.deepcopy(
-              self.model_single.decoder).cpu().state_dict())
-
-          # now average the decoder
-          for i, decoder in enumerate(self.best_decoders):
-            # for each weight key
-            for key, val in decoder.items():
-              # if it is the first time, zero the entry first
-              if i == 0:
-                avg_decoder[key].data.zero_()
-              # then sum the avg contribution
-              avg_decoder[key] += (decoder[key] / \
-                  float(len(self.best_decoders))).to(decoder[key].dtype)
-
-          # append current head to its circular buffer
-          current_head = self.model_single.head.state_dict()
-          avg_head = copy.deepcopy(self.model_single.head).cpu().state_dict()
-          self.best_heads.append(copy.deepcopy(
-              self.model_single.head).cpu().state_dict())
-
-          # now average the head
-          for i, head in enumerate(self.best_heads):
-            # for each weight key
-            for key, val in head.items():
-              # if it is the first time, zero the entry first
-              if i == 0:
-                avg_head[key].data.zero_()
-              # then sum the avg contribution
-              avg_head[key] += (head[key] / float(len(self.best_heads))).to(head[key].dtype)
-
-          # put averaged weights in dictionary and evaluate again
-          self.model_single.backbone.load_state_dict(avg_backbone)
-          self.model_single.decoder.load_state_dict(avg_decoder)
-          self.model_single.head.load_state_dict(avg_head)
-
-          # evaluate on validation set
-          acc, iou, losses, _ = self.validate(val_loader=self.parser.get_valid_set(),
-                                            model=self.model,
-                                            evaluator=self.evaluator,
-                                            save_images=self.CFG["train"]["save_imgs"],
-                                            class_dict=self.CFG["dataset"]["labels"])
-
-          # update info
-          for key in losses:
-            self.info['valid_' + key + '_avg_models'] = losses[key]
-          self.info["valid_acc_avg_models"] = acc
-          self.info["valid_iou_avg_models"] = iou
-
-          # restore the current weights into model
-          self.model_single.backbone.load_state_dict(current_backbone)
-          self.model_single.decoder.load_state_dict(current_decoder)
-          self.model_single.head.load_state_dict(current_head)
-
-          # save the weights!
-          self.save_checkpoint(
-              current_backbone, current_decoder, current_head, suffix="_single")
-          self.save_checkpoint(avg_backbone, avg_decoder, avg_head, suffix="")
-
-        print("*" * 80)
-
-        # save to log
-        self.save_to_log(logdir=self.log,
-                         logger=self.tb_logger,
-                         info=self.info,
-                         epoch=epoch,
-                         w_summary=self.CFG["train"]["save_summary"],
-                         rand_imgs=rand_img,
-                         img_summary=self.CFG["train"]["save_imgs"])
-
     print('Finished Training')
 
     return
+
+  def report_validation(self):
+    # evaluate on validation set
+    print("Validation on valid set")
+    images = dict()
+    acc, iou, losses, rand_img = self.validate(
+      val_loader=self.parser.validloader,
+      model=self.model,
+      evaluator=self.evaluator,
+      save_images=self.CFG["train"]["save_imgs"],
+      class_dict=self.CFG["dataset"]["labels"],
+      save_image_each=self.valid_save_image_each
+    )
+
+    images['valid'] = rand_img
+
+    # update info
+    for key in losses:
+        self.info['valid_' + key] = losses[key]
+
+    self.info["valid_acc"] = acc
+    self.info["valid_iou"] = iou
+
+    # remember best iou and save checkpoint
+    if iou > best_val_iou and epoch > 0:
+      print("Best mean iou in validation so far, save model!")
+      print("*" * 100)
+      best_val_iou = iou
+
+      # save the weights!
+      current_backbone = self.model_single.backbone.state_dict()
+      current_decoder = self.model_single.decoder.state_dict()
+      current_head = self.model_single.head.state_dict()
+      self.save_checkpoint(
+          current_backbone, current_decoder, current_head, suffix="_single")
+
+      if False:
+        self.average_models_and_save()
+
+    print("*" * 100)
+    print("Validation on test set")
+    acc, iou, losses, rand_img = self.validate(
+      val_loader=self.parser.testloader,
+      model=self.model,
+      evaluator=self.evaluator,
+      save_images=self.CFG["train"]["save_imgs"],
+      class_dict=self.CFG["dataset"]["labels"],
+      save_image_each=self.test_save_image_each
+    )
+
+    images['test'] = rand_img
+
+    # update info
+    for key in losses:
+        self.info['test_' + key] = losses[key]
+
+    self.info["test_acc"] = acc
+    self.info["test_iou"] = iou
+
+    # save to log
+    self.save_to_log(logdir=self.log,
+                      logger=self.tb_logger,
+                      info=self.info,
+                      epoch=epoch,
+                      w_summary=self.CFG["train"]["save_summary"],
+                      rand_imgs=images,
+                      img_summary=self.CFG["train"]["save_imgs"])
+    print("*" * 100)
+
+  def average_models_and_save(self):
+    raise NotImplementedError()
+    # now average the models and evaluate again
+    print("Averaging the best {0} models".format(self.best_n_models))
+
+    # append current backbone to its circular buffer
+    current_backbone = self.model_single.backbone.state_dict()
+    avg_backbone = copy.deepcopy(
+        self.model_single.backbone).cpu().state_dict()
+    self.best_backbones.append(copy.deepcopy(
+        self.model_single.backbone).cpu().state_dict())
+
+    # now average the backbone
+    for i, backbone in enumerate(self.best_backbones):
+        # for each weight key
+      for key, val in backbone.items():
+        # if it is the first time, zero the entry first
+        if i == 0:
+          avg_backbone[key].data.zero_()
+        # then sum the avg contribution
+        avg_backbone[key] += (backbone[key] / \
+            float(len(self.best_backbones))).to(avg_backbone[key].dtype)
+
+    # append current backbone to its circular buffer
+    current_decoder = self.model_single.decoder.state_dict()
+    avg_decoder = copy.deepcopy(
+        self.model_single.decoder).cpu().state_dict()
+    self.best_decoders.append(copy.deepcopy(
+        self.model_single.decoder).cpu().state_dict())
+
+    # now average the decoder
+    for i, decoder in enumerate(self.best_decoders):
+      # for each weight key
+      for key, val in decoder.items():
+        # if it is the first time, zero the entry first
+        if i == 0:
+          avg_decoder[key].data.zero_()
+        # then sum the avg contribution
+        avg_decoder[key] += (decoder[key] / \
+            float(len(self.best_decoders))).to(decoder[key].dtype)
+
+    # append current head to its circular buffer
+    current_head = self.model_single.head.state_dict()
+    avg_head = copy.deepcopy(self.model_single.head).cpu().state_dict()
+    self.best_heads.append(copy.deepcopy(
+        self.model_single.head).cpu().state_dict())
+
+    # now average the head
+    for i, head in enumerate(self.best_heads):
+      # for each weight key
+      for key, val in head.items():
+        # if it is the first time, zero the entry first
+        if i == 0:
+          avg_head[key].data.zero_()
+        # then sum the avg contribution
+        avg_head[key] += (head[key] / float(len(self.best_heads))).to(head[key].dtype)
+
+    # put averaged weights in dictionary and evaluate again
+    self.model_single.backbone.load_state_dict(avg_backbone)
+    self.model_single.decoder.load_state_dict(avg_decoder)
+    self.model_single.head.load_state_dict(avg_head)
+
+    # evaluate on validation set
+    acc, iou, losses, _ = self.validate(val_loader=self.parser.get_valid_set(),
+                                      model=self.model,
+                                      evaluator=self.evaluator,
+                                      save_images=self.CFG["train"]["save_imgs"],
+                                      class_dict=self.CFG["dataset"]["labels"])
+
+    # update info
+    for key in losses:
+      self.info['valid_' + key + '_avg_models'] = losses[key]
+    self.info["valid_acc_avg_models"] = acc
+    self.info["valid_iou_avg_models"] = iou
+
+    # restore the current weights into model
+    self.model_single.backbone.load_state_dict(current_backbone)
+    self.model_single.decoder.load_state_dict(current_decoder)
+    self.model_single.head.load_state_dict(current_head)
+
+    # save the weights!
+    self.save_checkpoint(
+        current_backbone, current_decoder, current_head, suffix="_single")
+    self.save_checkpoint(avg_backbone, avg_decoder, avg_head, suffix="")
 
   def run_single_batch(self, model, batch):
       if self.gpu:
@@ -556,7 +561,7 @@ class Trainer():
   def binarize_output_mask(self, output_mask):
     return (output_mask > 0.5).long()
 
-  def validate(self, val_loader, model, evaluator, save_images, class_dict):
+  def validate(self, val_loader, model, evaluator, save_images, class_dict, save_image_each):
     batch_time = AverageMeter()
     acc = AverageMeter()
     iou = AverageMeter()
@@ -596,7 +601,7 @@ class Trainer():
         end = time.time()
 
         # save a random image, if desired
-        if save_images and (i % self.save_image_each == 0):
+        if save_images and (i % save_image_each == 0):
           index = np.random.randint(0, batch_size - 1)
           rand_imgs.append(self.make_log_image(batch=batch, batch_result=batch_result, index=index))
 
@@ -656,45 +661,3 @@ class Trainer():
       #     print(i, tensor.shape)
 
       return np.concatenate(sum([[x, sep] for x in result], [])[:-1], axis=1).astype(np.uint8)
-
-    # input = self.parser.get_inv_normalize()(input) * 255
-    # input = input.cpu().numpy().transpose(1, 2, 0)
-    # sep = np.ones((input.shape[0], 2, 3)) * 255
-    # pred = (output.cpu().numpy() > 0.5).astype(int)
-    # target = target.cpu().numpy()
-
-    # if prev_mask is not None:
-    #     raise NotImplementedError()
-    #     prev_mask = prev_mask.cpu().numpy().astype(np.uint8)
-
-    #     target_diff = self.colorizer.do(target - prev_mask)
-    #     pred_diff = self.colorizer.do(pred - prev_mask)
-    #     prev_mask = self.colorizer.do(prev_mask)
-    #     target = self.colorizer.do(target)
-    #     pred = self.colorizer.do(pred)
-
-    #     return np.concatenate([
-    #         input,
-    #         prev_mask * 0.5 + input * 0.5,
-    #         sep, target * 0.5 + input * 0.5,
-    #         sep, target_diff * 0.5 + input * 0.5,
-    #         sep, pred * 0.5 + input * 0.5,
-    #         sep, pred_diff * 0.5 + input * 0.5
-    #     ], axis=1).astype(np.uint8)
-
-    # if prev_image is not None:
-    #     prev_output = (prev_output.cpu().numpy() > 0.5).astype(int)
-    #     pseudo_target = (pseudo_target.cpu().numpy() > 0.5).astype(int)
-
-    #     prev_diff = self.colorizer.do(pseudo_target - prev_output)
-    #     prev_output = self.colorizer.do(prev_output)
-    #     pseudo_target = self.colorizer.do(pseudo_target)
-
-    #     return np.concatenate([
-    #         input,
-    #         sep, target * 0.5 + input * 0.5,
-    #         sep, pred * 0.5 + input * 0.5,
-    #         sep, prev_output * 0.5 + input * 0.5,
-    #         sep, pseudo_target * 0.5 + input * 0.5,
-    #         sep, prev_diff * 0.5 + input * 0.5,
-    #     ], axis=1).astype(np.uint8)

@@ -8,8 +8,8 @@ import numpy as np
 import torch
 
 
-def make_baseline_augmenter(scale, crop_size):
-    """Default augmenter, adds crop and resize"""
+def make_baseline_augmenter_random_crop_spoil(scale, crop_size):
+    """Default augmenter, adds crop and resize and random spoils"""
 
     h, w = crop_size
     return iaa.Sequential([
@@ -24,6 +24,15 @@ def make_baseline_augmenter(scale, crop_size):
                 iaa.GaussianBlur(sigma=(0, 1)),
             ])
         ])),
+    ], random_order=False)
+
+
+def make_baseline_augmenter_resize(crop_size):
+    """Augmenter for test set, does only resize"""
+
+    h, w = crop_size
+    return iaa.Sequential([
+        iaa.size.Resize({'width': w, 'height': h}, interpolation='linear')
     ], random_order=False)
 
 
@@ -197,20 +206,29 @@ def apply_optical_flow(image, optical_flow):
 class SegmentationAugmenter:
     def __init__(
         self,
-        scale, crop_size,
+        crop_size,
+        scale,
+        baseline_augmenter='train',
         prev_mask_generator=None,
         prev_image_generator=None,
         curr2prev_optical_flow_generator=None
     ):
-        super().__init__()
         h, w = crop_size
-        self.baseline_augmenter = make_baseline_augmenter(scale=scale, crop_size=crop_size)
+        if baseline_augmenter == 'random_crop_spoil':
+            self.baseline_augmenter = make_baseline_augmenter_random_crop_spoil(scale=scale, crop_size=crop_size)
+        elif baseline_generator == 'resize':
+            self.baseline_augmenter = make_baseline_augmenter_resize(crop_size=crop_size)
+        else:
+            raise NotImplementedError()
+
         self.pad = iaa.size.PadToFixedSize(w, h)
 
         def mask_postprocess(x):
+            """Fix bug with incorrect mask size after imgaug"""
             x = (x == 1).astype(np.uint8)
             if x.shape[:2] == crop_size: return x
             return cv2.resize(x, tuple(reversed(crop_size)), interpolation=cv2.INTER_LINEAR)
+
         self.mask_postprocess = mask_postprocess
 
         self.imgaug_affine_elastic_optical_flow_generator = make_optical_flow_generator(crop_size)

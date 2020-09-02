@@ -29,14 +29,12 @@ class OneShot_LR(toptim._LRScheduler):
     if self.step_size_down < 1:
       self.step_size_down = 1
 
-    self.step_size_down = self.step_size_down * max_lr / (max_lr - base_lr)
-
     # cyclic lr
     self.initial_scheduler = toptim.CyclicLR(self.optimizer,
                                              base_lr=0,
                                              max_lr=self.max_lr,
                                              step_size_up=self.step_size_up,
-                                             step_size_down=self.step_size_down,
+                                             step_size_down=self.step_size_down * max_lr / (max_lr - base_lr),
                                              cycle_momentum=self.cycle_momentum,
                                              base_momentum=self.base_momentum,
                                              max_momentum=self.max_momentum,
