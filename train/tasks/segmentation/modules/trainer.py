@@ -93,7 +93,7 @@ class Trainer():
                                      bn_d=self.CFG["decoder"]["bn_d"],
                                      extra=self.CFG["decoder"]["extra"])
 
-    self.head_cfg = HeadConfig(n_class=self.parser.get_n_classes() - 1,
+    self.head_cfg = HeadConfig(n_class=1,
                                dropout=self.CFG["head"]["dropout"])
 
     # concatenate the encoder and the head
@@ -186,7 +186,7 @@ class Trainer():
 
     # Use one shot learning rate
     # post decay and step sizes come in epochs and we want it in steps
-    steps_per_epoch = self.parser.get_train_size()
+    steps_per_epoch = len(self.parser.trainloader)
     up_steps = int(self.CFG["train"]["up_epochs"] * steps_per_epoch)
     down_steps = int(self.CFG["train"]["down_epochs"] * steps_per_epoch)
     final_decay = self.CFG["train"]["final_decay"] ** (1/steps_per_epoch)
@@ -241,7 +241,7 @@ class Trainer():
 
   def train(self):
     # accuracy and IoU stuff
-    best_val_iou = 0.0
+    self.best_val_iou = 0.0
 
     self.ignore_class = []
     for i, w in enumerate(self.loss_w):
@@ -249,7 +249,7 @@ class Trainer():
         self.ignore_class.append(i)
         print("Ignoring class ", i, " in IoU evaluation")
 
-    self.evaluator = iouEval(self.parser.get_n_classes(),
+    self.evaluator = iouEval(len(self.CFG["dataset"]["labels"]),
                              self.device, self.ignore_class)
 
     # image colorizer
@@ -276,10 +276,10 @@ class Trainer():
         print("Invalid learning rate groups optimizer")
 
       if epoch % self.CFG["train"]["report_epoch"] == 0:
-        self.report_validation()
+        self.report_validation(epoch=epoch)
 
       # train for 1 epoch
-      acc, iou, loss, update_mean = self.train_epoch(train_loader=self.parser.trainloader,
+      acc, iou, losses, update_mean = self.train_epoch(train_loader=self.parser.trainloader,
                                                      model=self.model,
                                                      optimizer=self.optimizer,
                                                      epoch=epoch,
@@ -288,8 +288,10 @@ class Trainer():
                                                      scheduler=self.scheduler)
 
       # update info
+      for key in losses:
+        self.info['train_' + key] = losses[key]
+
       self.info["train_update"] = update_mean
-      self.info["train_loss"] = loss
       self.info["train_acc"] = acc
       # self.info["train_iou"] = iou
 
@@ -297,8 +299,9 @@ class Trainer():
 
     return
 
-  def report_validation(self):
+  def report_validation(self, epoch):
     # evaluate on validation set
+    print("*" * 100)
     print("Validation on valid set")
     images = dict()
     acc, iou, losses, rand_img = self.validate(
@@ -320,17 +323,17 @@ class Trainer():
     self.info["valid_iou"] = iou
 
     # remember best iou and save checkpoint
-    if iou > best_val_iou and epoch > 0:
+    if iou > self.best_val_iou and epoch > 0:
       print("Best mean iou in validation so far, save model!")
       print("*" * 100)
-      best_val_iou = iou
+      self.best_val_iou = iou
 
       # save the weights!
       current_backbone = self.model_single.backbone.state_dict()
       current_decoder = self.model_single.decoder.state_dict()
       current_head = self.model_single.head.state_dict()
       self.save_checkpoint(
-          current_backbone, current_decoder, current_head, suffix="_single")
+          current_backbone, current_decoder, current_head, suffix="")
 
       if False:
         self.average_models_and_save()
@@ -428,7 +431,7 @@ class Trainer():
     self.model_single.head.load_state_dict(avg_head)
 
     # evaluate on validation set
-    acc, iou, losses, _ = self.validate(val_loader=self.parser.get_valid_set(),
+    acc, iou, losses, _ = self.validate(val_loader=self.parser.validloader,
                                       model=self.model,
                                       evaluator=self.evaluator,
                                       save_images=self.CFG["train"]["save_imgs"],
@@ -448,7 +451,7 @@ class Trainer():
     # save the weights!
     self.save_checkpoint(
         current_backbone, current_decoder, current_head, suffix="_single")
-    self.save_checkpoint(avg_backbone, avg_decoder, avg_head, suffix="")
+    self.save_checkpoint(avg_backbone, avg_decoder, avg_head, suffix="_average")
 
   def run_single_batch(self, model, batch):
       if self.gpu:
@@ -462,7 +465,7 @@ class Trainer():
         prev_output = model(image=batch['prev_image'], mask=None)
         pseudo_prev_mask = F.grid_sample(curr_output, batch['curr2prev_optical_flow'])
         temporal_loss = self.temporal_criterion(prev_output, pseudo_prev_mask)
-        loss = gt_loss + 0.3 * temporal_loss
+        loss = gt_loss + self.CFG["train"]["temporal_loss_strength"] * temporal_loss
 
         batch_result = {
           'gt_loss': gt_loss.mean().item(),
@@ -480,10 +483,18 @@ class Trainer():
   def train_epoch(self, train_loader, model, optimizer, epoch, evaluator, block_bn, scheduler):
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = AverageMeter()
     acc = AverageMeter()
     iou = AverageMeter()
     update_ratio_meter = AverageMeter()
+
+    if self.training_mode == 'temporal_loss':
+      losses = {
+        'gt_loss': AverageMeter(),
+        'temporal_loss': AverageMeter(),
+        'loss': AverageMeter()
+      }
+    else:
+      raise NotImplementedError()
 
     # empty the cache to train now
     if self.gpu:
@@ -518,7 +529,8 @@ class Trainer():
       optimizer.step()
 
       # measure accuracy and record loss
-      losses.update(batch_result['loss'], batch_size)
+      for key in losses:
+        losses[key].update(batch_result[key], batch_size)
 
       # with torch.no_grad():
         # evaluator.reset()
@@ -555,13 +567,13 @@ class Trainer():
               'acc {acc.val:.3f} ({acc.avg:.3f}) | '
               'IoU {iou.val:.3f} ({iou.avg:.3f})'.format(
                   epoch, i, len(train_loader), batch_time=batch_time,
-                  data_time=data_time, loss=losses, acc=acc, iou=iou, lr=lr,
+                  data_time=data_time, loss=losses['loss'], acc=acc, iou=iou, lr=lr,
                   umean=update_mean, ustd=update_std))
 
       # step scheduler
       scheduler.step()
 
-    return acc.avg, iou.avg, losses.avg, update_ratio_meter.avg
+    return acc.avg, iou.avg, {k: v.avg for k, v in losses.items()}, update_ratio_meter.avg
 
   def binarize_output_mask(self, output_mask):
     return (output_mask > 0.5).long()

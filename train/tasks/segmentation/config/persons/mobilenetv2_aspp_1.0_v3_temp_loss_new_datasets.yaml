@@ -17,10 +17,8 @@ train:
   save_imgs: True        # False doesn't save anything, True saves some
   num_images_to_save: 15
   avg_N: 3               # average the N best models
-  crop_prop:
-    height: 288
-    width: 512
   training_mode: "temporal_loss"
+  temporal_loss_strength: 1.0
   input_size: [288, 512, 3]
   scheduler: "oneshot"
 
@@ -55,6 +53,7 @@ head:
 
 # dataset (to find parser)
 dataset:
+  name: "persons_augmented_v3"
   train_datasets:
     - location: /home/g-korepanov/datasets/coco
       name: "coco"
@@ -75,7 +74,10 @@ dataset:
       baseline_augmenter: resize
       extra:
         ignore_files: ['35.png', '105.png', '118.png', '130.png', '318.png', '317.png', '319.png', '323.png', '289.png', '290.png', '283.png', '157.png', '246.png', '190.png', '305.png', '38.png', '133.png', '153.png', '156.png', '164.png', '177.png', '175.png', '173.png', '172.png', '174.png', '180.png', '170.png', '178.png', '182.png', '179.png', '181.png', '63.png', '169.png', '171.png', '176.png', '142.png', '93.png', '204.png']
-  workers: 10 # number of threads to get data
+  num_workers: 10 # number of threads to get data
+  crop_prop:
+    height: 288
+    width: 512
   img_means: # rgb
     - 0.46992042
     - 0.45250652

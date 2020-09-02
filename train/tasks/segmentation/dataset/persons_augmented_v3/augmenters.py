@@ -216,7 +216,7 @@ class SegmentationAugmenter:
         h, w = crop_size
         if baseline_augmenter == 'random_crop_spoil':
             self.baseline_augmenter = make_baseline_augmenter_random_crop_spoil(scale=scale, crop_size=crop_size)
-        elif baseline_generator == 'resize':
+        elif baseline_augmenter == 'resize':
             self.baseline_augmenter = make_baseline_augmenter_resize(crop_size=crop_size)
         else:
             raise NotImplementedError()

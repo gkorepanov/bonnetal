@@ -98,8 +98,8 @@ class Parser:
         self.num_workers = num_workers
 
         self.trainloader = self.make_dataloader(train_datasets, is_train=True)
-        self.validloader = self.make_dataloader(train_datasets, is_train=False)
-        self.testloader = self.make_dataloader(train_datasets, is_train=False)
+        self.validloader = self.make_dataloader(valid_datasets, is_train=False)
+        self.testloader = self.make_dataloader(test_datasets, is_train=False)
 
     def make_dataloader(self, params, is_train):
         datasets = []
@@ -113,16 +113,16 @@ class Parser:
                 prev_image_generator=self.prev_image_generator,
                 curr2prev_optical_flow_generator=self.curr2prev_optical_flow_generator
             )
-            extra_params = dataset['extra'] if 'extra' in dataset else dict()
-            dataset = DATASETS[dataset['name']](root_dir=dataset['location'], **extra_params)
+            extra_params = param['extra'] if 'extra' in param else dict()
+            dataset = DATASETS[param['name']](root_dir=param['location'], **extra_params)
             augmented_dataset = AugmentedSegmentationDataset(dataset, augmenter, self.norm, is_train=False)
             datasets.append(augmented_dataset)
 
         dataset = ConcatDataset(datasets)
         return torch.utils.data.DataLoader(dataset,
-            batch_size=batch_size,
+            batch_size=self.batch_size,
             shuffle=True,
-            num_workers=workers,
+            num_workers=self.num_workers,
             pin_memory=True,
             drop_last=True
         )
