@@ -191,15 +191,20 @@ class Trainer():
     down_steps = int(self.CFG["train"]["down_epochs"] * steps_per_epoch)
     final_decay = self.CFG["train"]["final_decay"] ** (1/steps_per_epoch)
 
-    self.scheduler = OneShot_LR(self.optimizer,
-                                base_lr=self.CFG["train"]["min_lr"],
-                                max_lr=self.CFG["train"]["max_lr"],
-                                step_size_up=up_steps,
-                                step_size_down=down_steps,
-                                cycle_momentum=True,
-                                base_momentum=self.CFG["train"]["min_momentum"],
-                                max_momentum=self.CFG["train"]["max_momentum"],
-                                post_decay=final_decay)
+    if self.CFG["train"]["scheduler"] == 'SGDR':
+      self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer,10 * steps_per_epoch, T_mult=1.5)
+    elif self.CFG["train"]["scheduler"] == 'oneshot':
+      self.scheduler = OneShot_LR(self.optimizer,
+                                  base_lr=self.CFG["train"]["min_lr"],
+                                  max_lr=self.CFG["train"]["max_lr"],
+                                  step_size_up=up_steps,
+                                  step_size_down=down_steps,
+                                  cycle_momentum=True,
+                                  base_momentum=self.CFG["train"]["min_momentum"],
+                                  max_momentum=self.CFG["train"]["max_momentum"],
+                                  post_decay=final_decay)
+    else:
+      raise NotImplementedError()
 
     if self.CFG["train"].get("last_epoch"):
         for _ in range(self.CFG["train"]["last_epoch"]): self.scheduler.step()
