@@ -2,10 +2,10 @@
 train:
   loss: "xentropy"       # must be either xentropy or iou
   max_epochs: 10000
-  max_lr: 0.001          # sgd learning rate max
-  min_lr: 0.0001         # warmup initial learning rate
-  up_epochs: 0.5         # warmup during first XX epochs (can be float)
-  down_epochs:  10       # warmdown during second XX epochs  (can be float)
+  max_lr: 0.01           # sgd learning rate max
+  min_lr: 0.001          # warmup initial learning rate
+  up_epochs: 0.3         # warmup during first XX epochs (can be float)
+  down_epochs:  100      # warmdown during second XX epochs  (can be float)
   max_momentum: 0.9      # sgd momentum max when lr is mim
   min_momentum: 0.85     # sgd momentum min when lr is max
   final_decay: 0.995     # learning rate decay per epoch after initial cycle (from min lr)
@@ -55,18 +55,6 @@ head:
 dataset:
   name: "persons_augmented_v3"
   train_datasets:
-#     - location: /home/g-korepanov/datasets/nvidia_processed/train
-#       name: "folder"
-#       scale: [0.2, 0.5]
-#       baseline_augmenter: random_crop_spoil
-#       extra:
-#         ignore_files: []
-#     - location: /home/g-korepanov/datasets/supervisely_processed/train
-#       name: "folder"
-#       scale: [0.5, 2.0]
-#       baseline_augmenter: random_crop_spoil
-#       extra:
-#         ignore_files: []
     - location: /home/g-korepanov/datasets/coco
       name: "coco"
       scale: [0.5, 2.0]
@@ -74,18 +62,6 @@ dataset:
       extra:
         is_train: True
   valid_datasets:
-#     - location: /home/g-korepanov/datasets/nvidia_processed/valid
-#       name: "folder"
-#       scale: [0.2, 0.5]
-#       baseline_augmenter: random_crop_spoil
-#       extra:
-#         ignore_files: []
-#     - location: /home/g-korepanov/datasets/supervisely_processed/valid
-#       name: "folder"
-#       scale: [0.5, 2.0]
-#       baseline_augmenter: random_crop_spoil
-#       extra:
-#         ignore_files: []
     - location: /home/g-korepanov/datasets/coco
       name: "coco"
       scale: [0.5, 2.0]
@@ -120,6 +96,6 @@ dataset:
     0: [0,0,0]
     1: [0,255,0]
     -1: [255,0,0]
-  curr2prev_optical_flow_generator: "imgaug_affine_elastic"
+  curr2prev_optical_flow_generator: "imgaug_affine_elastic_small"
   prev_image_generator: "optical_flow_and_local"
   prev_mask_generator: False
