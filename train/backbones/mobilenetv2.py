@@ -170,10 +170,7 @@ class Backbone(nn.Module):
 
   def forward(self, image, mask):
     if self.use_prev_mask:
-      x = torch.cat([
-          image,
-          mask.unsqueeze(0)
-      ], dim=1)
+      x = torch.cat([image, mask], dim=1)
     else:
       x = image
     input_size = x.shape[2]

@@ -168,7 +168,7 @@ def make_local_non_geometric_image_augmenter(crop_size):
     ], random_order=False)
 
 
-def make_optical_flow_augmenter(crop_size):
+def make_optical_flow_augmenter_small(crop_size):
     h, w = crop_size
     alpha_parameter = iap.Uniform(0, 60)
 
@@ -188,19 +188,45 @@ def make_optical_flow_augmenter(crop_size):
     return augment
 
 
-def make_optical_flow_generator(crop_size):
+def make_optical_flow_augmenter_large(crop_size):
     h, w = crop_size
-    augmenter = make_optical_flow_augmenter(crop_size)
+    alpha_parameter = iap.Uniform(0, 60)
+
+    def augment(*args, **kwargs):
+        alpha = alpha_parameter.draw_sample()
+        sigma = alpha / 2.5
+        augmenter = iaa.Sequential([
+            iaa.Affine(
+                scale=iap.Normal(loc=1, scale=0.1),
+                translate_percent=iap.Normal(loc=0, scale=0.1),
+                shear=iap.Normal(loc=0, scale=5),
+                backend='cv2'
+            ),
+            iaa.Sometimes(0.3, iaa.OneOf([
+                iaa.ElasticTransformation(alpha=alpha, sigma=sigma)),
+                iaa.PiecewiseAffine(scale=(0.01, 0.05))
+            ])
+        ], random_order=False)
+        return augmenter(*args, **kwargs)
+    return augment
+
+
+def make_optical_flow_generator(crop_size, optical_flow_augmenter):
+    h, w = crop_size
     grid = np.stack(np.meshgrid(np.linspace(1, 3, w), np.linspace(1, 3, h)), axis=-1).astype(np.float32)
-    return lambda: augmenter(image=grid) - 2
+    return lambda: optical_flow_augmenter(image=grid) - 2
 
 
 def apply_optical_flow(image, optical_flow):
+    initial_shape = image.shape
+    assert initial_shape[:2] = optical_flow.shape[:2]
+    if len(initial_shape) == 2:
+        image = np.unsqueeze(image, axis=-1)
     optical_flow_torch = torch.tensor(optical_flow).unsqueeze(0).to(torch.float32)
     image_torch = torch.tensor(image).permute(2, 0, 1).unsqueeze(0).to(torch.float32)
     result_torch = torch.nn.functional.grid_sample(image_torch, optical_flow_torch, align_corners=False)
     result = result_torch[0].permute(1, 2, 0).numpy().astype(np.uint8)
-    return result
+    return result.reshape(initial_shape)
 
 
 class SegmentationAugmenter:
@@ -230,12 +256,19 @@ class SegmentationAugmenter:
             return cv2.resize(x, tuple(reversed(crop_size)), interpolation=cv2.INTER_LINEAR)
 
         self.mask_postprocess = mask_postprocess
-
-        self.imgaug_affine_elastic_optical_flow_generator = make_optical_flow_generator(crop_size)
         self.local_non_geometric_image_augmenter = make_local_non_geometric_image_augmenter(crop_size)
         self.curr2prev_optical_flow_generator = curr2prev_optical_flow_generator
         self.prev_image_generator = prev_image_generator
         self.prev_mask_generator = prev_mask_generator
+
+        if self.curr2prev_optical_flow_generator == 'imgaug_affine_elastic_small':
+            self.optical_flow_generator = \
+                make_optical_flow_generator(crop_size, make_optical_flow_augmenter_small(crop_size))
+        elif self.curr2prev_optical_flow_generator == 'imgaug_affine_elastic_large':
+            self.optical_flow_generator = \
+                make_optical_flow_generator(crop_size, make_optical_flow_augmenter_large(crop_size))
+        else:
+            raise NotImplementedError()
 
     def to_imgaug_format(self, image, label):
         image = np.array(image)
@@ -262,8 +295,8 @@ class SegmentationAugmenter:
 
         if not self.curr2prev_optical_flow_generator:
             pass
-        elif self.curr2prev_optical_flow_generator == 'imgaug_affine_elastic':
-            result['curr2prev_optical_flow'] = self.imgaug_affine_elastic_optical_flow_generator()
+        elif self.curr2prev_optical_flow_generator in ('imgaug_affine_elastic_small', 'imgaug_affine_elastic_large'):
+            result['curr2prev_optical_flow'] = self.optical_flow_generator()
         else:
             raise NotImplementedError()
 
@@ -278,6 +311,9 @@ class SegmentationAugmenter:
 
         if not self.prev_mask_generator:
             pass
+        elif self.prev_mask_generator == 'optical_flow':
+            prev_mask = apply_optical_flow(result['prev_mask'], result['curr2prev_optical_flow'])
+            result['prev_mask'] = prev_mask
         else:
             raise NotImplementedError()
 

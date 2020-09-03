@@ -456,13 +456,46 @@ class Trainer():
 
         prev_output = model(image=batch['prev_image'], mask=None)
         pseudo_prev_mask = F.grid_sample(curr_output, batch['curr2prev_optical_flow'])
+        pseudo_prev_mask = pseudo_prev_mask.detach()  # previously this was not done and hence might work worse
         temporal_loss = self.temporal_criterion(prev_output, pseudo_prev_mask)
         loss = gt_loss + self.CFG["train"]["temporal_loss_strength"] * temporal_loss
 
         batch_result = {
-          'gt_loss': gt_loss.mean().item(),
-          'temporal_loss': temporal_loss.mean().item(),
-          'loss': loss.mean().item(),
+          'losses': {
+            'gt_loss': gt_loss.mean().item(),
+            'temporal_loss': temporal_loss.mean().item(),
+            'loss': loss.mean().item(),
+          },
+          'curr_output': curr_output,
+          'prev_output': prev_output,
+          'pseudo_prev_mask': pseudo_prev_mask
+        }
+      elif self.training_mode == 'temporal_loss_mask_prop':
+        n, c, h, w = batch['curr_image'].shape
+        empty_mask = torch.zeros(size=(n, 1, h, w),  dtype=torch.float32, requires_grad=False)
+        if self.gpu:
+          empty_mask = empty_mask.cuda()
+        curr_output = model(image=batch['curr_image'], mask=empty_mask)
+        gt_loss = self.criterion(torch.cat([1 - curr_output, curr_output], dim=1), batch['curr_mask'])
+
+        prev_output = model(image=batch['prev_image'], mask=curr_output.detach())
+        pseudo_prev_mask = F.grid_sample(curr_output, batch['curr2prev_optical_flow'])
+        pseudo_prev_mask = pseudo_prev_mask.detach()
+        temporal_loss = self.temporal_criterion(prev_output, pseudo_prev_mask)
+        prev_gt_loss = self.criterion(torch.cat([1 - prev_output, prev_output], dim=1), batch['prev_mask'])
+        loss = (
+          gt_loss +
+          self.CFG["train"]["temporal_loss_strength"] * temporal_loss +
+          self.CFG["train"]["prev_gt_loss_strength"] * prev_gt_loss
+        )
+
+        batch_result = {
+          'losses': {
+            'gt_loss': gt_loss.mean().item(),
+            'temporal_loss': temporal_loss.mean().item(),
+            'loss': loss.mean().item(),
+            'prev_gt_loss': prev_gt_loss.mean().item()
+          },
           'curr_output': curr_output,
           'prev_output': prev_output,
           'pseudo_prev_mask': pseudo_prev_mask
@@ -477,15 +510,7 @@ class Trainer():
     data_time = AverageMeter()
     iou = AverageMeter()
     update_ratio_meter = AverageMeter()
-
-    if self.training_mode == 'temporal_loss':
-      losses = {
-        'gt_loss': AverageMeter(),
-        'temporal_loss': AverageMeter(),
-        'loss': AverageMeter()
-      }
-    else:
-      raise NotImplementedError()
+    losses = collections.defaultdict(AverageMeter)
 
     # empty the cache to train now
     if self.gpu:
@@ -520,8 +545,8 @@ class Trainer():
       optimizer.step()
 
       # record loss
-      for key in losses:
-        losses[key].update(batch_result[key], batch_size)
+      for key in batch_result['losses']:
+        losses[key].update(batch_result['losses'][key], batch_size)
 
       # with torch.no_grad():
         # evaluator.reset()
@@ -568,16 +593,8 @@ class Trainer():
 
   def validate(self, val_loader, model, evaluator, save_images, class_dict, save_image_each):
     batch_time = AverageMeter()
+    losses = collections.defaultdict(AverageMeter)
     rand_imgs = []
-
-    if self.training_mode == 'temporal_loss':
-      losses = {
-        'gt_loss': AverageMeter(),
-        'temporal_loss': AverageMeter(),
-        'loss': AverageMeter()
-      }
-    else:
-      raise NotImplementedError()
 
     # switch to evaluate mode
     model.eval()
@@ -596,8 +613,9 @@ class Trainer():
         # measure accuracy and record loss
         evaluator.addBatch(self.binarize_output_mask(batch_result['curr_output']), batch['curr_mask'])
 
-        for key in losses:
-          losses[key].update(batch_result[key], batch_size)
+        # record loss
+        for key in batch_result['losses']:
+          losses[key].update(batch_result['losses'][key], batch_size)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -642,7 +660,7 @@ class Trainer():
         self.colorizer.do(curr_output) * 0.5 + curr_image * 0.5
       ]
 
-      if self.training_mode == 'temporal_loss':
+      if self.training_mode in ('temporal_loss', 'temporal_loss_mask_prop'):
           prev_image = self.parser.get_inv_normalize()(batch['prev_image'][index])
           prev_image = prev_image.permute(1, 2, 0).cpu().numpy() * 255
 
