@@ -202,10 +202,7 @@ def make_optical_flow_augmenter_large(crop_size):
                 shear=iap.Normal(loc=0, scale=5),
                 backend='cv2'
             ),
-            iaa.Sometimes(0.3, iaa.OneOf([
-                iaa.ElasticTransformation(alpha=alpha, sigma=sigma)),
-                iaa.PiecewiseAffine(scale=(0.01, 0.05))
-            ])
+            iaa.Sometimes(0.3, iaa.ElasticTransformation(alpha=alpha, sigma=sigma))
         ], random_order=False)
         return augmenter(*args, **kwargs)
     return augment
@@ -219,9 +216,9 @@ def make_optical_flow_generator(crop_size, optical_flow_augmenter):
 
 def apply_optical_flow(image, optical_flow):
     initial_shape = image.shape
-    assert initial_shape[:2] = optical_flow.shape[:2]
+    assert initial_shape[:2] == optical_flow.shape[:2]
     if len(initial_shape) == 2:
-        image = np.unsqueeze(image, axis=-1)
+        image = image[..., np.newaxis]
     optical_flow_torch = torch.tensor(optical_flow).unsqueeze(0).to(torch.float32)
     image_torch = torch.tensor(image).permute(2, 0, 1).unsqueeze(0).to(torch.float32)
     result_torch = torch.nn.functional.grid_sample(image_torch, optical_flow_torch, align_corners=False)
@@ -312,7 +309,7 @@ class SegmentationAugmenter:
         if not self.prev_mask_generator:
             pass
         elif self.prev_mask_generator == 'optical_flow':
-            prev_mask = apply_optical_flow(result['prev_mask'], result['curr2prev_optical_flow'])
+            prev_mask = apply_optical_flow(result['curr_mask'], result['curr2prev_optical_flow'])
             result['prev_mask'] = prev_mask
         else:
             raise NotImplementedError()

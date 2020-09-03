@@ -25,3 +25,4 @@ class COCOPersonDataset:
 
     def __len__(self):
         return len(self.image_ids)
+

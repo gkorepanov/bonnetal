@@ -121,6 +121,6 @@ dataset:
     0: [0,0,0]
     1: [0,255,0]
     -1: [255,0,0]
-  curr2prev_optical_flow_generator: "imgaug_affine_elastic"
+  curr2prev_optical_flow_generator: "imgaug_affine_elastic_large"
   prev_image_generator: "optical_flow_and_local"
   prev_mask_generator: "optical_flow"
