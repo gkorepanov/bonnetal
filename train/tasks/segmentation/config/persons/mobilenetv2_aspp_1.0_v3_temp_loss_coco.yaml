@@ -55,43 +55,43 @@ head:
 dataset:
   name: "persons_augmented_v3"
   train_datasets:
-     - location: /home/g-korepanov/datasets/nvidia_processed/train
-       name: "folder"
-       scale: [0.2, 0.5]
-       baseline_augmenter: random_crop_spoil
-       extra:
-         ignore_files: []
-     - location: /home/g-korepanov/datasets/supervisely_processed/train
-       name: "folder"
-       scale: [0.5, 2.0]
-       baseline_augmenter: random_crop_spoil
-       extra:
-         ignore_files: []
-#    - location: /home/g-korepanov/datasets/coco
-#      name: "coco"
-#      scale: [0.5, 2.0]
-#      baseline_augmenter: random_crop_spoil
-#      extra:
-#        is_train: True
+#     - location: /home/g-korepanov/datasets/nvidia_processed/train
+#       name: "folder"
+#       scale: [0.2, 0.5]
+#       baseline_augmenter: random_crop_spoil
+#       extra:
+#         ignore_files: []
+#     - location: /home/g-korepanov/datasets/supervisely_processed/train
+#       name: "folder"
+#       scale: [0.5, 2.0]
+#       baseline_augmenter: random_crop_spoil
+#       extra:
+#         ignore_files: []
+    - location: /home/g-korepanov/datasets/coco
+      name: "coco"
+      scale: [0.5, 2.0]
+      baseline_augmenter: random_crop_spoil
+      extra:
+        is_train: True
   valid_datasets:
-     - location: /home/g-korepanov/datasets/nvidia_processed/valid
-       name: "folder"
-       scale: [0.2, 0.5]
-       baseline_augmenter: random_crop_spoil
-       extra:
-         ignore_files: []
-     - location: /home/g-korepanov/datasets/supervisely_processed/valid
-       name: "folder"
-       scale: [0.5, 2.0]
-       baseline_augmenter: random_crop_spoil
-       extra:
-         ignore_files: []
-#    - location: /home/g-korepanov/datasets/coco
-#      name: "coco"
-#      scale: [0.5, 2.0]
-#      baseline_augmenter: random_crop_spoil
-#      extra:
-#        is_train: False
+#     - location: /home/g-korepanov/datasets/nvidia_processed/valid
+#       name: "folder"
+#       scale: [0.2, 0.5]
+#       baseline_augmenter: random_crop_spoil
+#       extra:
+#         ignore_files: []
+#     - location: /home/g-korepanov/datasets/supervisely_processed/valid
+#       name: "folder"
+#       scale: [0.5, 2.0]
+#       baseline_augmenter: random_crop_spoil
+#       extra:
+#         ignore_files: []
+    - location: /home/g-korepanov/datasets/coco
+      name: "coco"
+      scale: [0.5, 2.0]
+      baseline_augmenter: random_crop_spoil
+      extra:
+        is_train: False
   test_datasets:
     - location: /home/g-korepanov/datasets/web_crop
       name: "folder"

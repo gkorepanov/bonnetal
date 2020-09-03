@@ -40,13 +40,10 @@ class Trainer():
     self.tb_logger = Logger(self.log + "/tb")
     self.info = {"train_update": 0,
                  "train_loss": 0,
-                 "train_acc": 0,
                  "train_iou": 0,
                  "valid_loss": 0,
-                 "valid_acc": 0,
                  "valid_iou": 0,
                  "valid_loss_avg_models": 0,
-                 "valid_acc_avg_models": 0,
                  "valid_iou_avg_models": 0,
                  "feat_lr": 0,
                  "decoder_lr": 0,
@@ -240,7 +237,6 @@ class Trainer():
         logger.image_summary(tag, imgs, epoch)
 
   def train(self):
-    # accuracy and IoU stuff
     self.best_val_iou = 0.0
 
     self.ignore_class = []
@@ -279,7 +275,7 @@ class Trainer():
         self.report_validation(epoch=epoch)
 
       # train for 1 epoch
-      acc, iou, losses, update_mean = self.train_epoch(train_loader=self.parser.trainloader,
+      iou, losses, update_mean = self.train_epoch(train_loader=self.parser.trainloader,
                                                      model=self.model,
                                                      optimizer=self.optimizer,
                                                      epoch=epoch,
@@ -292,7 +288,6 @@ class Trainer():
         self.info['train_' + key] = losses[key]
 
       self.info["train_update"] = update_mean
-      self.info["train_acc"] = acc
       # self.info["train_iou"] = iou
 
     print('Finished Training')
@@ -304,7 +299,7 @@ class Trainer():
     print("*" * 100)
     print("Validation on valid set")
     images = dict()
-    acc, iou, losses, rand_img = self.validate(
+    iou, losses, rand_img = self.validate(
       val_loader=self.parser.validloader,
       model=self.model,
       evaluator=self.evaluator,
@@ -319,11 +314,10 @@ class Trainer():
     for key in losses:
         self.info['valid_' + key] = losses[key]
 
-    self.info["valid_acc"] = acc
     self.info["valid_iou"] = iou
 
     # remember best iou and save checkpoint
-    if iou > self.best_val_iou and epoch > 0:
+    if iou > self.best_val_iou and epoch >= 0:
       print("Best mean iou in validation so far, save model!")
       print("*" * 100)
       self.best_val_iou = iou
@@ -340,7 +334,7 @@ class Trainer():
 
     print("*" * 100)
     print("Validation on test set")
-    acc, iou, losses, rand_img = self.validate(
+    iou, losses, rand_img = self.validate(
       val_loader=self.parser.testloader,
       model=self.model,
       evaluator=self.evaluator,
@@ -355,7 +349,6 @@ class Trainer():
     for key in losses:
         self.info['test_' + key] = losses[key]
 
-    self.info["test_acc"] = acc
     self.info["test_iou"] = iou
 
     # save to log
@@ -431,7 +424,7 @@ class Trainer():
     self.model_single.head.load_state_dict(avg_head)
 
     # evaluate on validation set
-    acc, iou, losses, _ = self.validate(val_loader=self.parser.validloader,
+    iou, losses, _ = self.validate(val_loader=self.parser.validloader,
                                       model=self.model,
                                       evaluator=self.evaluator,
                                       save_images=self.CFG["train"]["save_imgs"],
@@ -440,7 +433,6 @@ class Trainer():
     # update info
     for key in losses:
       self.info['valid_' + key + '_avg_models'] = losses[key]
-    self.info["valid_acc_avg_models"] = acc
     self.info["valid_iou_avg_models"] = iou
 
     # restore the current weights into model
@@ -483,7 +475,6 @@ class Trainer():
   def train_epoch(self, train_loader, model, optimizer, epoch, evaluator, block_bn, scheduler):
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    acc = AverageMeter()
     iou = AverageMeter()
     update_ratio_meter = AverageMeter()
 
@@ -528,16 +519,14 @@ class Trainer():
       loss.backward(loss_idx)
       optimizer.step()
 
-      # measure accuracy and record loss
+      # record loss
       for key in losses:
         losses[key].update(batch_result[key], batch_size)
 
       # with torch.no_grad():
         # evaluator.reset()
         # evaluator.addBatch(output.argmax(dim=1), target)
-        # accuracy = evaluator.getacc()
         # jaccard, class_jaccard = evaluator.getIoU()
-      # acc.update(accuracy.item(), batch_size)
       # iou.update(class_jaccard[-1].item(), batch_size)
 
       # measure elapsed time
@@ -564,24 +553,21 @@ class Trainer():
               'Time {batch_time.val:.3f} ({batch_time.avg:.3f}) | '
               'Data {data_time.val:.3f} ({data_time.avg:.3f}) | '
               'Loss {loss.val:.4f} ({loss.avg:.4f}) | '
-              'acc {acc.val:.3f} ({acc.avg:.3f}) | '
               'IoU {iou.val:.3f} ({iou.avg:.3f})'.format(
                   epoch, i, len(train_loader), batch_time=batch_time,
-                  data_time=data_time, loss=losses['loss'], acc=acc, iou=iou, lr=lr,
+                  data_time=data_time, loss=losses['loss'], iou=iou, lr=lr,
                   umean=update_mean, ustd=update_std))
 
       # step scheduler
       scheduler.step()
 
-    return acc.avg, iou.avg, {k: v.avg for k, v in losses.items()}, update_ratio_meter.avg
+    return iou.avg, {k: v.avg for k, v in losses.items()}, update_ratio_meter.avg
 
   def binarize_output_mask(self, output_mask):
     return (output_mask > 0.5).long()
 
   def validate(self, val_loader, model, evaluator, save_images, class_dict, save_image_each):
     batch_time = AverageMeter()
-    acc = AverageMeter()
-    iou = AverageMeter()
     rand_imgs = []
 
     if self.training_mode == 'temporal_loss':
@@ -622,24 +608,20 @@ class Trainer():
           index = np.random.randint(0, batch_size - 1)
           rand_imgs.append(self.make_log_image(batch=batch, batch_result=batch_result, index=index))
 
-      accuracy = evaluator.getacc()
       jaccard, class_jaccard = evaluator.getIoU()
-      acc.update(accuracy.item(), batch_size)
-      iou.update(jaccard.item(), batch_size)
+      iou = class_jaccard[1].item()
 
       print('Validation set:\n'
             'Time avg per batch {batch_time.avg:.3f}\n'
             'Loss avg {loss.avg:.4f}\n'
-            'Acc avg {acc.avg:.3f}\n'
-            'IoU avg {iou.avg:.3f}'.format(batch_time=batch_time,
-                                           loss=losses['loss'],
-                                           acc=acc, iou=iou))
+            'IoU avg {iou:.3f}'.format(batch_time=batch_time,
+                                           loss=losses['loss'], iou=iou))
       # print also classwise
       for i, jacc in enumerate(class_jaccard):
         print('IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
             i=i, class_str=class_dict[i], jacc=jacc))
 
-    return acc.avg, iou.avg, {k: v.avg for k, v in losses.items()}, rand_imgs
+    return iou, {k: v.avg for k, v in losses.items()}, rand_imgs
 
   def make_log_image(self, batch, batch_result, index):
       # for key, tensor in batch.items():
