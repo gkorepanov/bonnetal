@@ -75,6 +75,13 @@ class Trainer():
     for idx, w in self.CFG["dataset"]["labels_w"].items():
       self.loss_w[idx] = torch.tensor(w)
 
+    if self.training_mode == 'temporal_loss':
+      use_prev_mask = False
+    elif self.training_mode == 'temporal_loss_mask_prop':
+      use_prev_mask = True
+    else:
+      raise NotImplementedError()
+
     # get architecture and build backbone (with pretrained weights)
     self.bbone_cfg = BackboneConfig(name=self.CFG["backbone"]["name"],
                                     os=self.CFG["backbone"]["OS"],
@@ -83,6 +90,7 @@ class Trainer():
                                     d=self.data_d,
                                     dropout=self.CFG["backbone"]["dropout"],
                                     bn_d=self.CFG["backbone"]["bn_d"],
+                                    use_prev_mask=use_prev_mask,
                                     extra=self.CFG["backbone"]["extra"])
 
     self.decoder_cfg = DecoderConfig(name=self.CFG["decoder"]["name"],
@@ -456,7 +464,8 @@ class Trainer():
 
         prev_output = model(image=batch['prev_image'], mask=None)
         pseudo_prev_mask = F.grid_sample(curr_output, batch['curr2prev_optical_flow'])
-        pseudo_prev_mask = pseudo_prev_mask.detach()  # previously this was not done and hence might work worse
+        if self.CFG["train"]["detach_pseudo_mask"]:
+          pseudo_prev_mask = pseudo_prev_mask.detach()
         temporal_loss = self.temporal_criterion(prev_output, pseudo_prev_mask)
         loss = gt_loss + self.CFG["train"]["temporal_loss_strength"] * temporal_loss
 
@@ -480,7 +489,8 @@ class Trainer():
 
         prev_output = model(image=batch['prev_image'], mask=curr_output.detach())
         pseudo_prev_mask = F.grid_sample(curr_output, batch['curr2prev_optical_flow'])
-        pseudo_prev_mask = pseudo_prev_mask.detach()
+        if self.CFG["train"]["detach_pseudo_mask"]:
+          pseudo_prev_mask = pseudo_prev_mask.detach()
         temporal_loss = self.temporal_criterion(prev_output, pseudo_prev_mask)
         prev_gt_loss = self.criterion(torch.cat([1 - prev_output, prev_output], dim=1), batch['prev_mask'])
         loss = (

@@ -18,6 +18,7 @@ train:
   num_images_to_save: 15
   avg_N: 3               # average the N best models
   training_mode: "temporal_loss_mask_prop"
+  detach_pseudo_mask: True
   temporal_loss_strength: 0.6
   prev_gt_loss_strength: 1.0
   input_size: [288, 512, 3]
@@ -35,7 +36,6 @@ backbone:
     shallow_feats: True # get features before the last layer (mn2)
     aggressive_downsample: True
     prune_last_layer: True
-    use_prev_mask: False
 
 decoder:
   name: "aspp_progressive"

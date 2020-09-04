@@ -20,11 +20,11 @@ class LayerParam(IntEnum):
 
 
 class Backbone(nn.Module):
-  def __init__(self, input_size=[224, 224, 3], OS=32, dropout=0.0, bn_d=0.1, extra=None, weights_online=True):
+  def __init__(self, input_size=[224, 224, 3], OS=32, dropout=0.0, bn_d=0.1, use_prev_mask=False, extra=None, weights_online=True):
     super(Backbone, self).__init__()
     self.width_mult = extra["width_mult"]
     self.shallow_feats = extra["shallow_feats"]
-    self.use_prev_mask = extra["use_prev_mask"]
+    self.use_prev_mask = use_prev_mask
     if self.use_prev_mask:
       assert input_size[-1] == 4
     else:
